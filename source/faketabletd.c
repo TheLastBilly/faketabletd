@@ -17,11 +17,22 @@
 #include "faketabletd.h"
 #include "utilities.h"
 
+#define CLOSE_UINPUT_DEVICE(fd)     \
+{                                   \
+    if(fd >= 0)                     \
+    {                               \
+        ioctl(fd, UI_DEV_DESTROY);  \
+        close(fd);                  \
+    }                               \
+}
+
 static struct libusb_context *usb_context;
 static struct libusb_device  **device_list, *device;
 static struct libusb_device_handle *device_handle;
 static struct libusb_device_descriptor descriptor;
 static struct libusb_transfer *device_transfer;
+static uint8_t *transfer_buffer;
+static volatile int pen_device, pad_device;
 static size_t devices_detected;
 
 static volatile bool should_close;
@@ -74,8 +85,8 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, int 
     int ret = 0;
     // Detach interface from the kernel and claim it for ourselves
     ret  = libusb_detach_kernel_driver(handle, interface);
-    if(ret != LIBUSB_ERROR_NOT_FOUND)
-        __CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d, are you running as root?", interface);
+    if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
+        __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d, are you running as root?", interface);
 
     __CATCHER_CRITICAL(libusb_claim_interface(handle, interface), "cannot claim interface %d", interface);
 
@@ -111,9 +122,59 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, int 
     ), "cannot set protocol on interface %d", interface);
 }
 
+static void interrupt_transfer_callback(struct libusb_transfer *transfer)
+{
+    VALIDATE(transfer != NULL, "cannot process null transfer");
+    
+    switch (transfer->status)
+    {
+    case LIBUSB_TRANSFER_COMPLETED:
+        process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
+        break;
+    
+    // Taken from https://github.com/DIGImend/digimend-userspace-drivers/blob/main/src/dud-translate.c
+#define MAP(_name, _desc)                       \
+    case LIBUSB_TRANSFER_##_name:               \
+        __CATCHER_CRITICAL(-1, _desc);          \
+        break
+
+        MAP(ERROR,      "interrupt transfer failed");
+        MAP(TIMED_OUT,  "interrupt transfer timed out");
+        MAP(STALL,      "interrupt transfer halted (endpoint stalled)");
+        MAP(NO_DEVICE,  "device was disconnected");
+        MAP(OVERFLOW,   "interrupt transfer overflowed "
+                        "(device sent more data than requested)");
+#undef MAP
+
+    case LIBUSB_TRANSFER_CANCELLED:
+        break;
+    
+    default:
+        __CATCHER_CRITICAL(-1, "Uknown transfer error: %d", transfer->status)
+        break;
+    }
+}
+
 // Free allocated objects and deinitialize libusb
 static void cleannup(void)
 {
+    should_close = true;
+
+    CLOSE_UINPUT_DEVICE(pen_device);
+    CLOSE_UINPUT_DEVICE(pad_device);
+
+    if(device_transfer != NULL)
+    {
+        libusb_free_transfer(device_transfer);
+        device_transfer = NULL;
+    }
+
+    if(transfer_buffer != NULL)
+    {
+        free(transfer_buffer);
+        transfer_buffer = NULL;
+    }
+
     if(interface_0.claimed)
     {
         libusb_release_interface(device_handle, interface_0.number);
@@ -153,11 +214,14 @@ static void cleannup(void)
         usb_context = NULL;
         devices_detected = 0;
     }
+
+    __INFO("Done executing cleannup");
 }
 
 int main(int argc, char const *argv[])
 {
     size_t index = 0;
+    struct input_id virtual_device_id;
     const char* device_name = NULL;
 
     // Make sure we catch Ctrl-C when asked to terminate
@@ -200,6 +264,31 @@ int main(int argc, char const *argv[])
     // Claim interfaces 0 and 1 (dunno yet why the two of them but it works so...)
     claim_interface_for_handle(device_handle, 0);
     claim_interface_for_handle(device_handle, 1);
+
+    // Create virtual pen and pad
+    virtual_device_id = (struct input_id){
+        .vendor = FAKETABLETD_FAKE_VENDOR_ID,
+        .product = FAKETABLETD_FAKE_PRODUCT_ID,
+        .version = FAKETABLETD_FAKE_VERSION,
+    };
+    pad_device = create_virtual_pad(&virtual_device_id, FAKETABLETD_FAKE_NAME "pen");
+    pen_device = create_virtual_pen(&virtual_device_id, FAKETABLETD_FAKE_NAME "pad");
+
+    // Allocate space for tranfer callback
+    transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));
+    __CATCHER_CRITICAL(transfer_buffer == NULL ? -1 : 0, "cannot allocate memory for transfer buffer");
+
+    device_transfer = libusb_alloc_transfer(0);
+    __CATCHER_CRITICAL(device_transfer == NULL ? -1 : 0, "cannot allocate libusb transfer");
+
+    // Register transfer callback
+    libusb_fill_interrupt_transfer(device_transfer, 
+        device_handle, HID_ENDPOINT, 
+        transfer_buffer, HID_BUFFER_SIZE, 
+        interrupt_transfer_callback,
+        NULL, 0
+    );
+    __USB_CATCHER_CRITICAL(libusb_submit_transfer(device_transfer), "cannot submit device transfer");
 
     while(!should_close)
     {

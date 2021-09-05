@@ -7,11 +7,13 @@
 
 #include <libusb-1.0/libusb.h>
 
+#define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
+
 // Loggers
 #define __FTD_LOG(_file, _fmt, _args...)    fprintf(_file, _fmt "\n", ##_args)
 #define __INFO(_fmt, _args...)              __FTD_LOG(stdout, _fmt, ##_args)
 #define __WARNING(_fmt, _args...)           __FTD_LOG(stdout, "warning: " _fmt, ##_args)
-#define __ERROR(_fmt, _args...)             __FTD_LOG(stderr, "error: " _fmt, ##_args)
+#define __ERROR(_fmt, _args...)             __FTD_LOG(stderr, "error [%s:%d]: " _fmt, __FILENAME__, __LINE__, ##_args)
 
 // Catchers
 #define __BASE_CATCHER(_expr, _fmt, extra, _args...)                        \
@@ -50,3 +52,5 @@
     __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(ret), ##_args)
 
 #endif
+
+#define VALIDATE(_expr, _fmt, _args...) __CATCHER_CRITICAL((_expr) ? 0 : -1, _fmt, ##_args);
