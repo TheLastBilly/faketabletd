@@ -84,7 +84,7 @@ int hs610_create_virtual_pen(struct input_id *id, const char *name)
         if(ret < 0) break;
 
         // Enable remaining devices
-        ret = ioctl(fd, UI_SET_RELBIT, REL_WHEEL);      if(ret < 0) break;
+        ret = ioctl(fd, UI_SET_ABSBIT, REL_WHEEL);      if(ret < 0) break;
         ret = ioctl(fd, UI_SET_MSCBIT, MSC_SERIAL);     if(ret < 0) break;
         
         // Setup absolute values

@@ -20,6 +20,9 @@
 #define FORM_24BIT(a, b, c)         ((int32_t)(a) << 16 | (int32_t)(b) << 8 | (int32_t)(c))
 #define FORM_16BIT(a, b)            ((uint16_t)(a) << 8 | (uint16_t)(b))
 
+// tl;dr, the scroll wheel goes from 0x00 to 0x0d (12 positions) and
+// the wacom driver can only take values from 0 to 71. The comparison
+// at the start is just to orientate the wheel from left to right
 #define CONVERT_RAW_DIAL(_val)      (_val > 6 ? (19 - _val) : (7 - _val)) * 71 / 12
 
 #ifdef VALIDATE
@@ -44,7 +47,7 @@
         ret = write(_fd, &ev, sizeof(ev)),              \
         "cannot send event data"                        \
     );                                                  \
-    if(ret < 0) return 0;                               \
+    if(ret < 0) return -1;                              \
 }
 
 static const uint32_t btn_codes[] = 
@@ -111,9 +114,8 @@ int hs610_process_raw_input(const uint8_t *data, size_t size, int pad_device, in
         else
             SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_TOOL_PEN, 0);
 
-        // Don't know what these two are for, but they seem to be needed,
-        // there is some info on them here tho
-        // https://github.com/linuxwacom/input-wacom/wiki/Kernel-Input-Event-Overview
+        // A serial number is required when sending button press
+        // events from a pen device. Or somthing like that...
         SEND_INPUT_EVENT(pen_device, EV_MSC, MSC_SERIAL, 1098942556);
         SEND_INPUT_EVENT(pen_device, EV_SYN, SYN_REPORT, 1);
     }
@@ -146,9 +148,9 @@ int hs610_process_raw_input(const uint8_t *data, size_t size, int pad_device, in
             int32_t dial_value = data[5];
             if(dial_value != 0)
                 dial_value = CONVERT_RAW_DIAL(dial_value);
-            
+
             // https://github.com/DIGImend/digimend-kernel-drivers/issues/275#issuecomment-667822380
-            SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_MISC, dial_value ? 15 : 0);
+            SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_MISC, dial_value > 0 ? 15 : 0);
             SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_WHEEL, dial_value);
             SEND_INPUT_EVENT(pad_device, EV_SYN, SYN_REPORT, 1);
             break;

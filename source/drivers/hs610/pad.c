@@ -30,9 +30,7 @@ static const uint32_t btn_codes[] =
     BTN_A,
     BTN_B,
     BTN_C,
-    BTN_X, 
-    BTN_Y, 
-    BTN_Z
+    BTN_STYLUS
 };
 
 static const int abs_codes[] =

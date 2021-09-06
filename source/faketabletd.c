@@ -180,7 +180,8 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 {
     int ret = 0;
     bool error_found = true;
-    VALIDATE(transfer != NULL, "cannot process null transfer");
+    
+    if(transfer == NULL || get_should_close()) return;
     
     switch (transfer->status)
     {
