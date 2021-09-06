@@ -267,7 +267,6 @@ static bool look_for_devices(const char **device_name)
 
 int main(int argc, char const *argv[])
 {
-    size_t index = 0;
     int ret = 0;
 
     // Initialize locals

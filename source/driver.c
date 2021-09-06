@@ -109,9 +109,9 @@ int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_
             SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_TOOL_PEN, 1);
 
             // Send button data
-            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_TOUCH, (report_type & REPORT_PEN_TOUCH_MASK != 0));
-            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_STYLUS, (report_type & REPORT_PEN_BTN_STYLUS != 0));
-            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_STYLUS2, (report_type & REPORT_PEN_BTN_STYLUS2 != 0));
+            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_TOUCH, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
+            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_STYLUS, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
+            SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_STYLUS2, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
         }
         // Otherwise, let the virtual pen know we are not touching the frame
         else
@@ -163,4 +163,6 @@ int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_
             return 0;
         }
     }
+
+    return 0;
 }

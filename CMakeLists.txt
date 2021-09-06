@@ -2,6 +2,7 @@ cmake_minimum_required (VERSION 3.0)
 
 project(faketabletd)
 set(CMAKE_C_STANDARD 11)
+add_compile_options(-Wall)
 
 find_package(PkgConfig REQUIRED)
 
