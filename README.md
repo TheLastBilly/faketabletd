@@ -29,14 +29,14 @@ cmake ..
 make
 ```
 
-This will create a file called `build/bin/faketabletd` on the folder where you clonned this repository. To make this executable more accessible in the future, you can copy it into your `/usr/bin/` folder. For example:
+This will create a file called `build/bin/faketabletd` on the folder where you clonned this repository. To make this executable more accessible in the future, you can copy it into your `/usr/bin/` folder.
 ```bash
 sudo cp build/bin/faketabletd /usr/bin
 ```
 
 ### Using faketabletd
 
-As of the writing of this guide, **faketabletd** requires **root** to work (yeah...), so in order to run it you will need to use `sudo`. For example:
+As of the writing of this guide, **faketabletd** requires **root** to work (yeah...), so in order to run it you will need to use `sudo`.
 
 ```bash
 sudo faketabletd
