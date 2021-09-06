@@ -423,6 +423,8 @@ int main(int argc, char const *argv[])
 
         __INFO("looking for compatible devices...");
         while(!get_should_close() && !look_for_devices(&device_name)) SLEEP_FOR_US(100);
+        if(get_should_close())
+            break;
 
         // Let us know what you've found
         __INFO("found supported device: %s (%04x:%04x)", device_name, descriptor.idVendor, descriptor.idProduct);
