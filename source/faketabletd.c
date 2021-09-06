@@ -181,10 +181,15 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, stru
 {
     int ret = 0;
     // Detach interface from the kernel and claim it for ourselves
-    ret  = libusb_detach_kernel_driver(handle, interface->number);
-    if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
-        __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d", interface->number);
-    interface->detached_from_kernel = true;
+    if(libusb_kernel_driver_active(handle, interface->number) == 1)
+    {
+        ret  = libusb_detach_kernel_driver(handle, interface->number);
+        if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
+            __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d", interface->number);
+        interface->detached_from_kernel = true;
+    }
+    else
+        interface->detached_from_kernel = false;
 
     __CATCHER_CRITICAL(libusb_claim_interface(handle, interface->number), "cannot claim interface %d", interface->number);
     interface->claimed = true;
