@@ -142,12 +142,13 @@ int hs610_process_raw_input(const uint8_t *data, size_t size, int pad_device, in
         
         case REPORT_DIAL_ID:
         {
+            // The scrolling wheel goes from 0x00 to 0x00d
             int32_t dial_value = data[5];
             if(dial_value != 0)
                 dial_value = CONVERT_RAW_DIAL(dial_value);
             
+            // https://github.com/DIGImend/digimend-kernel-drivers/issues/275#issuecomment-667822380
             SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_MISC, dial_value ? 15 : 0);
-
             SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_WHEEL, dial_value);
             SEND_INPUT_EVENT(pad_device, EV_SYN, SYN_REPORT, 1);
             break;

@@ -20,14 +20,23 @@
 
 #include "drivers/hs610/hs610.h"
 
-#define CLOSE_UINPUT_DEVICE(fd)     \
-{                                   \
-    if(fd >= 0)                     \
-    {                               \
-        ioctl(fd, UI_DEV_DESTROY);  \
-        close(fd);                  \
-        fd = -1;                    \
-    }                               \
+#define USE_RETURNING_CALLBACK(_cb, ...)                        \
+{                                                               \
+    VALIDATE(                                                   \
+        _cb != NULL,                                            \
+        "cannot call empty callback \"" #_cb "\""               \
+    );                                                          \
+    return _cb(__VA_ARGS__);                                    \
+}
+
+#define CLOSE_UINPUT_DEVICE(fd)                                 \
+{                                                               \
+    if(fd >= 0)                                                 \
+    {                                                           \
+        ioctl(fd, UI_DEV_DESTROY);                              \
+        close(fd);                                              \
+        fd = -1;                                                \
+    }                                                           \
 }
 
 static struct libusb_context *usb_context;
@@ -39,8 +48,16 @@ static uint8_t *transfer_buffer;
 static volatile int pen_device, pad_device;
 static size_t devices_detected;
 
+// Device info callbacks
+get_name_callback_t get_pad_name_callback;
+get_name_callback_t get_pen_name_callback;
+get_input_id_callback_t get_input_id_callback;
+
+// Device setup callbacks
 create_virtual_device_callback_t create_virtual_pad_callback;
 create_virtual_device_callback_t create_virtual_pen_callback;
+
+// Parsing callbacks
 process_raw_input_callback_t process_raw_input_callback;
 
 REGISTER_MUTEX_VARIABLE(bool, should_close);
@@ -55,27 +72,29 @@ struct interface_status_t
 static struct interface_status_t interface_0, interface_1;
 
 // Callback handlers
+static inline struct input_id * get_input_id()
+{ USE_RETURNING_CALLBACK(get_input_id_callback); }
+static inline const char *get_pad_name()
+{ USE_RETURNING_CALLBACK(get_pad_name_callback); }
+static inline const char *get_pen_name()
+{ USE_RETURNING_CALLBACK(get_pen_name_callback); }
+
 static inline int create_virtual_pad(struct input_id *id, const char *name)
-{
-    VALIDATE(create_virtual_pad_callback != NULL, "cannot call empty callback");
-    return create_virtual_pad_callback(id, name);
-}
+{ USE_RETURNING_CALLBACK(create_virtual_pad_callback, id, name); }
 static inline int create_virtual_pen(struct input_id *id, const char *name)
-{
-    VALIDATE(create_virtual_pen_callback != NULL, "cannot call empty callback");
-    return create_virtual_pen_callback(id, name);
-}
+{ USE_RETURNING_CALLBACK(create_virtual_pen_callback, id, name); }
 
 static inline int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
-{
-    VALIDATE(process_raw_input_callback != NULL, "cannot call empty callback");
-    return process_raw_input_callback(data, size, pad_device, pen_device);
-}
+{ USE_RETURNING_CALLBACK(process_raw_input_callback, data, size, pad_device, pen_device); }
 
-// Global signal handler
-static void signal_handler(int sig)
+// Signal handlers
+static void sigint_handler(int sig)
 {
     __INFO("SIGINT detected, terminating...");
+    exit(0);
+}
+static inline void sigterm_handler(int sig)
+{
     exit(0);
 }
 
@@ -92,10 +111,14 @@ static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
             {
             case USB_DEVICE_ID_HUION_TABLET:
             case USB_DEVICE_ID_HUION_HS610:
+                get_input_id_callback = &hs610_get_device_id;
+                get_pad_name_callback = &hs610_get_pad_name;
+                get_pen_name_callback = &hs610_get_pen_name;
+
                 create_virtual_pad_callback = &hs610_create_virtual_pad;
                 create_virtual_pen_callback = &hs610_create_virtual_pen;
                 process_raw_input_callback = &hs610_process_raw_input;
-                return "HS610";
+                return hs610_get_device_name();
             default:
                 break;
             }
@@ -264,6 +287,9 @@ static void cleannup(void)
         usb_context = NULL;
     }
 
+    get_pad_name_callback = NULL;
+    get_pen_name_callback = NULL;
+    get_input_id_callback = NULL;
 
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
@@ -308,6 +334,10 @@ int main(int argc, char const *argv[])
     device_transfer     = NULL;
     transfer_buffer     = NULL;
 
+    get_pad_name_callback = NULL;
+    get_pen_name_callback = NULL;
+    get_input_id_callback = NULL;
+
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
     process_raw_input_callback = NULL;
@@ -320,11 +350,11 @@ int main(int argc, char const *argv[])
     should_close = false;
     should_reset = true;
 
-    struct input_id virtual_device_id = {};
     const char* device_name = NULL;
 
     // Make sure we catch Ctrl-C when asked to terminate
-    signal(SIGINT, signal_handler);
+    signal(SIGINT, sigint_handler);
+    signal(SIGTERM, sigterm_handler);
 
     // Make sure we clean our mess before we leave
     atexit(cleannup);
@@ -368,14 +398,8 @@ int main(int argc, char const *argv[])
         claim_interface_for_handle(device_handle, &interface_1);
 
         // Create virtual pen and pad
-        virtual_device_id = (struct input_id){
-            .bustype = BUS_USB,
-            .vendor = FAKETABLETD_FAKE_VENDOR_ID,
-            .product = FAKETABLETD_FAKE_PRODUCT_ID,
-            .version = FAKETABLETD_FAKE_VERSION,
-        };
-        pad_device = create_virtual_pad(&virtual_device_id, FAKETABLETD_FAKE_NAME "pen");
-        pen_device = create_virtual_pen(&virtual_device_id, FAKETABLETD_FAKE_NAME "pad");
+        pad_device = create_virtual_pad(get_input_id(), get_pad_name());
+        pen_device = create_virtual_pen(get_input_id(), get_pen_name());
 
         // Allocate space for tranfer callback
         transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));

@@ -10,11 +10,6 @@
 #define USB_DEVICE_ID_HUION_TABLET	0x006e
 #define USB_DEVICE_ID_HUION_HS610	0x006d
 
-#define FAKETABLETD_FAKE_VENDOR_ID  0x056a
-#define FAKETABLETD_FAKE_PRODUCT_ID 0x0314
-#define FAKETABLETD_FAKE_VERSION    0x0110
-#define FAKETABLETD_FAKE_NAME       "Wacom Intuos Pro S"
-
 // Used for HID devices. You can read more on this
 // by going into the following link and looking for "00100001"
 // https://www.usb.org/sites/default/files/hid1_11.pdf
@@ -35,6 +30,8 @@
 
 #define FAKETABLETD_UINTPUT_OFLAGS  (O_WRONLY | O_NONBLOCK)
 
+typedef const char *(*get_name_callback_t) (void);
+typedef struct input_id *(*get_input_id_callback_t) (void);
 typedef int (*create_virtual_device_callback_t)(struct input_id *id, const char *name);
 typedef int (*process_raw_input_callback_t)(const uint8_t *data, size_t size, int pad_device, int pen_device);
 
