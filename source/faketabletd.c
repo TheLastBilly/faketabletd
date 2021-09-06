@@ -116,8 +116,8 @@ static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
                 get_pad_name_callback = &hs610_get_pad_name;
                 get_pen_name_callback = &hs610_get_pen_name;
 
-                create_virtual_pad_callback = &hs610_create_virtual_pad;
-                create_virtual_pen_callback = &hs610_create_virtual_pen;
+                create_virtual_pad_callback = &generic_create_virtual_pad;
+                create_virtual_pen_callback = &generic_create_virtual_pen;
                 process_raw_input_callback = &hs610_process_raw_input;
                 return hs610_get_device_name();
             default:
