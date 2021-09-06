@@ -111,10 +111,16 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
             // Let the virtual pen know the real pen is present
             SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOOL_PEN, 1);
 
+            // Update the driver
+            SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
+
             // Send button data
             SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOUCH, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
             SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
             SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS2, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
+
+            // Update the driver
+            SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
         }
         // Otherwise, let the virtual pen know we are not touching the frame
         else

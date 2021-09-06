@@ -7,6 +7,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <getopt.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -264,7 +265,6 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 
     case LIBUSB_TRANSFER_NO_DEVICE:
         __INFO("device has been disconnected!");
-        set_should_reset(true);
         break;
 
     case LIBUSB_TRANSFER_CANCELLED:
@@ -285,7 +285,6 @@ static void cleannup(void)
     devices_detected = 0;
 
     set_should_close(false);
-    set_should_reset(true);
 
     CLOSE_UINPUT_DEVICE(mouse_device);
     CLOSE_UINPUT_DEVICE(pen_device);
@@ -308,21 +307,21 @@ static void cleannup(void)
         libusb_release_interface(device_handle, interface_0.number);
         interface_0.claimed = false;
     }
-    if(interface_0.detached_from_kernel)
-    {
-        libusb_attach_kernel_driver(device_handle, interface_0.number);
-        interface_0.detached_from_kernel = false;
-    }
-    
     if(interface_1.claimed)
     {
         libusb_release_interface(device_handle, interface_1.number);
         interface_1.claimed = false;
     }
+
     if(interface_1.detached_from_kernel)
     {
         libusb_attach_kernel_driver(device_handle, interface_1.number);
         interface_1.detached_from_kernel = false;
+    }
+    if(interface_0.detached_from_kernel)
+    {
+        libusb_attach_kernel_driver(device_handle, interface_0.number);
+        interface_0.detached_from_kernel = false;
     }
 
     if(device_handle != NULL)
@@ -378,9 +377,27 @@ static bool look_for_devices(const char **device_name)
     return false;
 }
 
-int main(int argc, char const *argv[])
+static inline void print_help()
 {
+    printf(
+        "Usage: faketabletd [OPTION]\n"
+        "User space driver for drawing tablets\n\n"
+        
+        "Options\n"
+        "  -m\t\t\tEnables virtual mouse emulation\n"
+        "  -s\t\t\tDisables reset on disconnect\n\n"
+
+        "Examples:\n"
+        "  faketabletd -m\tRuns driver with virtual mouse emulation\n"
+        "  faketabletd -ms\tRuns driver with virtual mouse emulation. Will exit on disconnect\n"
+    );
+}
+
+int main(int argc, char const **argv)
+{
+    // Local variables
     int ret = 0;
+    bool use_virtual_mouse = false;
 
     // Initialize locals
     usb_context         = NULL;
@@ -416,8 +433,33 @@ int main(int argc, char const *argv[])
     // Make sure we clean our mess before we leave
     atexit(cleannup);
 
+    // Get argument options
+    while((ret = getopt(argc, (char* const*)argv, "msh")) != -1)
+    {
+        switch (ret)
+        {
+        case 'm':
+            use_virtual_mouse = true;
+            break;
+        case 's':
+            set_should_reset(false);
+            break;
+        case 'h':
+            print_help();
+            exit(0);
+            break;
+        default:
+            print_help();
+            exit(1);
+            break;
+        }
+    }
+
     while(1)
     {
+        // Make sure we are clear to go on every cycle
+        cleannup();
+
         // Initialize libusb context
         __USB_CATCHER_CRITICAL(libusb_init(&usb_context), "cannot create libusb context");
 
@@ -445,7 +487,6 @@ int main(int argc, char const *argv[])
                 break;
             
             default:
-                cleannup();
                 continue;
             }
         }
@@ -460,9 +501,8 @@ int main(int argc, char const *argv[])
         pad_device = create_virtual_pad(get_input_id(), get_pad_name());
         pen_device = create_virtual_pen(get_input_id(), get_pen_name());
     
-#ifdef FAKETABLETD_USE_VIRTUAL_MOUSE
-        mouse_device = create_virtual_mouse();
-#endif
+        if(use_virtual_mouse)
+            mouse_device = create_virtual_mouse();
 
         // Allocate space for tranfer callback
         transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));
@@ -494,9 +534,7 @@ int main(int argc, char const *argv[])
                 __USB_CATCHER_CRITICAL(ret, "usb event handling error: ");
         }
 
-        if(get_should_reset())
-            cleannup();
-        else
+        if(!get_should_reset())
             break;
     }
 
