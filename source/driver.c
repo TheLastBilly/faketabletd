@@ -102,8 +102,8 @@ int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_
 
             // Send tilt readinds
             SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_TILT_X, (int8_t)data[10]);
-            SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_TILT_X, -(int8_t)data[11]);    // Y axis needs to be inverted to point to the opposite
-                                                                                    // direction
+            SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_TILT_X, -(int8_t)data[11]);    // Y axis needs to be inverted so it point would
+                                                                                    // point to the opposite direction
             
             // Let the virtual pen know the real pen is present
             SEND_INPUT_EVENT(pen_device, EV_KEY, BTN_TOOL_PEN, 1);

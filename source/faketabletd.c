@@ -24,6 +24,7 @@
     {                               \
         ioctl(fd, UI_DEV_DESTROY);  \
         close(fd);                  \
+        fd = -1;                    \
     }                               \
 }
 
@@ -37,6 +38,7 @@ static volatile int pen_device, pad_device;
 static size_t devices_detected;
 
 REGISTER_MUTEX_VARIABLE(bool, should_close);
+REGISTER_MUTEX_VARIABLE(bool, should_reset);
 
 struct interface_status_t
 {
@@ -127,19 +129,19 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, stru
 
 static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 {
-    int _ret = 0;
+    int ret = 0;
     bool error_found = true;
     VALIDATE(transfer != NULL, "cannot process null transfer");
     
     switch (transfer->status)
     {
     case LIBUSB_TRANSFER_COMPLETED:
-        _ret = process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
-        if(!(error_found = _ret < 0))
+        ret = process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
+        if(!(error_found = ret < 0))
         {
             libusb_submit_transfer(transfer);
-            __USB_CATCHER(_ret, "cannot resubmit event transfer");
-            error_found = _ret < 0;
+            __USB_CATCHER(ret, "cannot resubmit event transfer");
+            error_found = ret < 0;
         }
         break;
     
@@ -152,10 +154,14 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
         MAP(ERROR,      "interrupt transfer failed");
         MAP(TIMED_OUT,  "interrupt transfer timed out");
         MAP(STALL,      "interrupt transfer halted (endpoint stalled)");
-        MAP(NO_DEVICE,  "device was disconnected");
         MAP(OVERFLOW,   "interrupt transfer overflowed "
                         "(device sent more data than requested)");
 #undef MAP
+
+    case LIBUSB_TRANSFER_NO_DEVICE:
+        __INFO("device has been disconnected!");
+        set_should_reset(true);
+        break;
 
     case LIBUSB_TRANSFER_CANCELLED:
         break;
@@ -172,7 +178,10 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 // Free allocated objects and deinitialize libusb
 static void cleannup(void)
 {
-    set_should_close(true);
+    devices_detected = 0;
+
+    set_should_close(false);
+    set_should_reset(true);
 
     CLOSE_UINPUT_DEVICE(pen_device);
     CLOSE_UINPUT_DEVICE(pad_device);
@@ -197,6 +206,7 @@ static void cleannup(void)
     if(interface_0.detached_from_kernel)
     {
         libusb_attach_kernel_driver(device_handle, interface_0.number);
+        interface_0.detached_from_kernel = false;
     }
     
     if(interface_1.claimed)
@@ -226,7 +236,6 @@ static void cleannup(void)
     {
         libusb_exit(usb_context);
         usb_context = NULL;
-        devices_detected = 0;
     }
 }
 
@@ -250,22 +259,18 @@ static bool look_for_devices(const char **device_name)
 
         // See if current device on the list is supported
         __USB_CATCHER(libusb_get_device_descriptor(device, &descriptor), "cannot get device descriptor");
-        if((*device_name = get_device_name(descriptor.idVendor, descriptor.idProduct)) != NULL) break;
+        if((*device_name = get_device_name(descriptor.idVendor, descriptor.idProduct)) != NULL) return true;
     }
-    // Exit if you didn't find any
-    if(i >= devices_detected) return false;
     
-    // Let us know what you've got if you did
-    __INFO("found supported device: %s (%04x:%04x)", *device_name, descriptor.idVendor, descriptor.idProduct);
-
-    return true;
+    return false;
 }
 
 int main(int argc, char const *argv[])
 {
     size_t index = 0;
+    int ret = 0;
 
-    // Initialize globals
+    // Initialize locals
     usb_context         = NULL;
     device_list         = NULL;
     device              = NULL;
@@ -279,6 +284,7 @@ int main(int argc, char const *argv[])
     descriptor = (struct libusb_device_descriptor){};
 
     should_close = false;
+    should_reset = true;
 
     struct input_id virtual_device_id = {};
     const char* device_name = NULL;
@@ -289,54 +295,81 @@ int main(int argc, char const *argv[])
     // Make sure we clean our mess before we leave
     atexit(cleannup);
 
-    // Initialize libusb context
-    __USB_CATCHER_CRITICAL(libusb_init(&usb_context), "cannot create libusb context");
-
-    __INFO("looking for compatible devices...");
-    while(!get_should_close() && !look_for_devices(&device_name)) SLEEP_FOR_US(100);
-
-    // Open device
-    __USB_CATCHER_CRITICAL(
-        libusb_open(device, &device_handle), 
-        "cannot open device with current handle"
-    );
-
-    // Claim interfaces 0 and 1 (dunno yet why the two of them but it works so...)
-    claim_interface_for_handle(device_handle, &interface_0);
-    claim_interface_for_handle(device_handle, &interface_1);
-
-    // Create virtual pen and pad
-    virtual_device_id = (struct input_id){
-        .bustype = BUS_USB,
-        .vendor = FAKETABLETD_FAKE_VENDOR_ID,
-        .product = FAKETABLETD_FAKE_PRODUCT_ID,
-        .version = FAKETABLETD_FAKE_VERSION,
-    };
-    pad_device = create_virtual_pad(&virtual_device_id, FAKETABLETD_FAKE_NAME "pen");
-    pen_device = create_virtual_pen(&virtual_device_id, FAKETABLETD_FAKE_NAME "pad");
-
-    // Allocate space for tranfer callback
-    transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));
-    __CATCHER_CRITICAL(transfer_buffer == NULL ? -1 : 0, "cannot allocate memory for transfer buffer");
-
-    device_transfer = libusb_alloc_transfer(0);
-    __CATCHER_CRITICAL(device_transfer == NULL ? -1 : 0, "cannot allocate libusb transfer");
-
-    // Register transfer callback
-    libusb_fill_interrupt_transfer(device_transfer, 
-        device_handle, HID_ENDPOINT, 
-        transfer_buffer, HID_BUFFER_SIZE, 
-        interrupt_transfer_callback,
-        NULL, 0
-    );
-    __USB_CATCHER_CRITICAL(libusb_submit_transfer(device_transfer), "cannot submit device transfer");
-
-    while(!get_should_close())
+    while(1)
     {
-        int ret = libusb_handle_events(usb_context);
-        if(ret < 0 && ret != LIBUSB_ERROR_INTERRUPTED)
-            __USB_CATCHER_CRITICAL(ret, "usb event handling error: ");
+        // Initialize libusb context
+        __USB_CATCHER_CRITICAL(libusb_init(&usb_context), "cannot create libusb context");
+
+        __INFO("looking for compatible devices...");
+        while(!get_should_close() && !look_for_devices(&device_name)) SLEEP_FOR_US(100);
+
+        // Let us know what you've found
+        __INFO("found supported device: %s (%04x:%04x)", device_name, descriptor.idVendor, descriptor.idProduct);
+
+        // Open device
+        __INFO("connecting to device");
+        __USB_CATCHER(
+            ret = libusb_open(device, &device_handle), 
+            "cannot open device with current handle"
+        );
+        if(ret < 0)
+        {
+            cleannup();
+            continue;
+        }
+        __INFO("connected!");
+
+        __INFO("configuring device...");
+        // Claim interfaces 0 and 1 (dunno yet why the two of them but it works so...)
+        claim_interface_for_handle(device_handle, &interface_0);
+        claim_interface_for_handle(device_handle, &interface_1);
+
+        // Create virtual pen and pad
+        virtual_device_id = (struct input_id){
+            .bustype = BUS_USB,
+            .vendor = FAKETABLETD_FAKE_VENDOR_ID,
+            .product = FAKETABLETD_FAKE_PRODUCT_ID,
+            .version = FAKETABLETD_FAKE_VERSION,
+        };
+        pad_device = create_virtual_pad(&virtual_device_id, FAKETABLETD_FAKE_NAME "pen");
+        pen_device = create_virtual_pen(&virtual_device_id, FAKETABLETD_FAKE_NAME "pad");
+
+        // Allocate space for tranfer callback
+        transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));
+        __CATCHER_CRITICAL(transfer_buffer == NULL ? -1 : 0, "cannot allocate memory for transfer buffer");
+
+        device_transfer = libusb_alloc_transfer(0);
+        __CATCHER_CRITICAL(device_transfer == NULL ? -1 : 0, "cannot allocate libusb transfer");
+
+        // Register transfer callback
+        libusb_fill_interrupt_transfer(device_transfer, 
+            device_handle, HID_ENDPOINT, 
+            transfer_buffer, HID_BUFFER_SIZE,
+
+            // Do keep in mind that this function will be handled from another
+            // thread, so terminating the program using exit from 
+            // here isn't an option
+            interrupt_transfer_callback,
+            
+            NULL, 0
+        );
+        __USB_CATCHER_CRITICAL(libusb_submit_transfer(device_transfer), "cannot submit device transfer");
+        __INFO("done configuring device!");
+
+        __INFO("ready!");
+        while(!get_should_close())
+        {
+            int ret = libusb_handle_events(usb_context);
+            if(ret < 0 && ret != LIBUSB_ERROR_INTERRUPTED)
+                __USB_CATCHER_CRITICAL(ret, "usb event handling error: ");
+        }
+
+        if(get_should_reset())
+            cleannup();
+        else
+            break;
     }
 
+    __INFO("terminating...");
     return 0;
 }
