@@ -1,15 +1,4 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <string.h>
-
-#include <sys/types.h>
-
-#include <fcntl.h>
-#include <linux/uinput.h>
-
-#include "faketabletd.h"
-#include "utilities.h"
+#include "drivers/hs610/hs610.h"
 
 #define SET_ABS_PROPERTY(_code, _value, _min, _max, _res)   \
     abs_setup = (struct uinput_abs_setup){};                \
@@ -63,7 +52,7 @@ static const uint8_t abs_codes[] =
     ABS_MISC
 };
 
-int create_virtual_pen(struct input_id *id, const char *name)
+int hs610_create_virtual_pen(struct input_id *id, const char *name)
 {
     int fd = -1, ret = 0;
     size_t size = 0, i = 0;

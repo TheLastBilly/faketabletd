@@ -18,6 +18,8 @@
 #include "faketabletd.h"
 #include "utilities.h"
 
+#include "drivers/hs610/hs610.h"
+
 #define CLOSE_UINPUT_DEVICE(fd)     \
 {                                   \
     if(fd >= 0)                     \
@@ -37,6 +39,10 @@ static uint8_t *transfer_buffer;
 static volatile int pen_device, pad_device;
 static size_t devices_detected;
 
+create_virtual_device_callback_t create_virtual_pad_callback;
+create_virtual_device_callback_t create_virtual_pen_callback;
+process_raw_input_callback_t process_raw_input_callback;
+
 REGISTER_MUTEX_VARIABLE(bool, should_close);
 REGISTER_MUTEX_VARIABLE(bool, should_reset);
 
@@ -48,6 +54,24 @@ struct interface_status_t
 };
 static struct interface_status_t interface_0, interface_1;
 
+// Callback handlers
+static inline int create_virtual_pad(struct input_id *id, const char *name)
+{
+    VALIDATE(create_virtual_pad_callback != NULL, "cannot call empty callback");
+    return create_virtual_pad_callback(id, name);
+}
+static inline int create_virtual_pen(struct input_id *id, const char *name)
+{
+    VALIDATE(create_virtual_pen_callback != NULL, "cannot call empty callback");
+    return create_virtual_pen_callback(id, name);
+}
+
+static inline int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
+{
+    VALIDATE(process_raw_input_callback != NULL, "cannot call empty callback");
+    return process_raw_input_callback(data, size, pad_device, pen_device);
+}
+
 // Global signal handler
 static void signal_handler(int sig)
 {
@@ -57,7 +81,7 @@ static void signal_handler(int sig)
 
 // Device name for the specified vendor and product id. Return NULL if
 // the specified device is not supported
-static const char * get_device_name(uint16_t vendor_id, uint16_t product_id)
+static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
 {
     switch (vendor_id)
     {
@@ -68,8 +92,10 @@ static const char * get_device_name(uint16_t vendor_id, uint16_t product_id)
             {
             case USB_DEVICE_ID_HUION_TABLET:
             case USB_DEVICE_ID_HUION_HS610:
+                create_virtual_pad_callback = &hs610_create_virtual_pad;
+                create_virtual_pen_callback = &hs610_create_virtual_pen;
+                process_raw_input_callback = &hs610_process_raw_input;
                 return "HS610";
-            
             default:
                 break;
             }
@@ -89,7 +115,7 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, stru
     // Detach interface from the kernel and claim it for ourselves
     ret  = libusb_detach_kernel_driver(handle, interface->number);
     if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
-        __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d, are you running as root?", interface->number);
+        __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d", interface->number);
     interface->detached_from_kernel = true;
 
     __CATCHER_CRITICAL(libusb_claim_interface(handle, interface->number), "cannot claim interface %d", interface->number);
@@ -237,6 +263,11 @@ static void cleannup(void)
         libusb_exit(usb_context);
         usb_context = NULL;
     }
+
+
+    create_virtual_pad_callback = NULL;
+    create_virtual_pen_callback = NULL;
+    process_raw_input_callback = NULL;
 }
 
 static bool look_for_devices(const char **device_name)
@@ -259,7 +290,7 @@ static bool look_for_devices(const char **device_name)
 
         // See if current device on the list is supported
         __USB_CATCHER(libusb_get_device_descriptor(device, &descriptor), "cannot get device descriptor");
-        if((*device_name = get_device_name(descriptor.idVendor, descriptor.idProduct)) != NULL) return true;
+        if((*device_name = setup_device(descriptor.idVendor, descriptor.idProduct)) != NULL) return true;
     }
     
     return false;
@@ -276,6 +307,10 @@ int main(int argc, char const *argv[])
     device_handle       = NULL;
     device_transfer     = NULL;
     transfer_buffer     = NULL;
+
+    create_virtual_pad_callback = NULL;
+    create_virtual_pen_callback = NULL;
+    process_raw_input_callback = NULL;
 
     pen_device          = -1;
     pad_device          = -1;
@@ -313,8 +348,17 @@ int main(int argc, char const *argv[])
         );
         if(ret < 0)
         {
-            cleannup();
-            continue;
+            switch (ret)
+            {
+            case LIBUSB_ERROR_ACCESS:
+                __WARNING("you need to be running as root in order to use this software");
+                exit(1);
+                break;
+            
+            default:
+                cleannup();
+                continue;
+            }
         }
         __INFO("connected!");
 

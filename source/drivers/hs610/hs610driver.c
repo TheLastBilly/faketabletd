@@ -1,10 +1,4 @@
-#include <stdio.h>
-#include <unistd.h>
-
-#include <linux/uinput.h>
-
-#include "faketabletd.h"
-#include "utilities.h"
+#include "drivers/hs610/hs610.h"
 
 // This is the size of the data that we are expecting to receive.
 // You can actually observe it in realtime by using the usbhid-dump command
@@ -73,7 +67,7 @@ static const uint32_t btn_codes[] =
     BTN_Z
 };
 
-int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
+int hs610_process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
 {
     int ret = 0;
     size_t i = 0;
