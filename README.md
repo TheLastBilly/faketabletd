@@ -61,9 +61,9 @@ User space driver for drawing tablets
 
 Options
   -m                    Enables virtual mouse emulation
-  -s                    Disables reset on disconnect
+  -r                    Resets the program back to the scanning phase on disconnect (experimental)
 
 Examples:
   faketabletd -m        Runs driver with virtual mouse emulation
-  faketabletd -ms       Runs driver with virtual mouse emulation. Will exit on disconnect
+  faketabletd -mr       Runs driver with virtual mouse emulation. Will not exit on disconnect
 ```

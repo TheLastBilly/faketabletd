@@ -390,11 +390,11 @@ static inline void print_help()
         
         "Options\n"
         "  -m\t\t\tEnables virtual mouse emulation\n"
-        "  -s\t\t\tDisables reset on disconnect\n\n"
+        "  -r\t\t\tResets the program back to the scanning phase on disconnect (experimental)\n\n"
 
         "Examples:\n"
         "  faketabletd -m\tRuns driver with virtual mouse emulation\n"
-        "  faketabletd -ms\tRuns driver with virtual mouse emulation. Will exit on disconnect\n"
+        "  faketabletd -mr\tRuns driver with virtual mouse emulation. Will no exit on disconnect\n"
     );
 }
 
@@ -403,6 +403,7 @@ int main(int argc, char const **argv)
     // Local variables
     int ret = 0;
     bool use_virtual_mouse = false;
+    unsigned char descriptor_string[50] = {};
 
     // Initialize locals
     usb_context         = NULL;
@@ -427,7 +428,7 @@ int main(int argc, char const **argv)
     descriptor = (struct libusb_device_descriptor){};
 
     should_close = false;
-    should_reset = true;
+    should_reset = false;
 
     const char* device_name = NULL;
 
@@ -439,15 +440,16 @@ int main(int argc, char const **argv)
     atexit(cleannup);
 
     // Get argument options
-    while((ret = getopt(argc, (char* const*)argv, "msh")) != -1)
+    while((ret = getopt(argc, (char* const*)argv, "mrh")) != -1)
     {
         switch (ret)
         {
         case 'm':
             use_virtual_mouse = true;
             break;
-        case 's':
-            set_should_reset(false);
+        case 'r':
+            set_should_reset(true);
+            __WARNING("-r has been set, this is an experimental feature and is known to cause problems");
             break;
         case 'h':
             print_help();
@@ -501,6 +503,12 @@ int main(int argc, char const **argv)
         // Claim interfaces 0 and 1 (dunno yet why the two of them but it works so...)
         claim_interface_for_handle(device_handle, &interface_0);
         claim_interface_for_handle(device_handle, &interface_1);
+
+        // Get string descriptor, don't know why, but digimend userspace does so...
+        __USB_CATCHER_CRITICAL(
+            libusb_get_string_descriptor(device_handle, 0xc8, 0x0409, descriptor_string, sizeof(descriptor_string)), 
+            "cannot get descriptor string"
+        );
 
         // Create virtual pen and pad
         pad_device = create_virtual_pad(get_input_id(), get_pad_name());
