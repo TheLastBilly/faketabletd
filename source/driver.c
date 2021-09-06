@@ -28,16 +28,29 @@
 
 #define CONVERT_RAW_DIAL(_val)      (_val > 6 ? (19 - _val) : (7 - _val)) * 71 / 12
 
+#ifdef VALIDATE
+#undef VALIDATE
+#define VALIDATE(_expr, _fmt, _args...)                 \
+{                                                       \
+    if(!(_expr))                                        \
+    {                                                   \
+        __ERROR(_fmt, ##_args);                         \
+        return -1;                                      \
+    }                                                   \
+}
+#endif
+
 // Send event to device using fd
 #define SEND_INPUT_EVENT(_fd, _type, _code, _value)     \
 {                                                       \
     ev.type = _type;                                    \
     ev.code = _code;                                    \
     ev.value = _value;                                  \
-    __STD_CATCHER_CRITICAL(                             \
-        write(_fd, &ev, sizeof(ev)),                    \
+    __STD_CATCHER(                                      \
+        ret = write(_fd, &ev, sizeof(ev)),              \
         "cannot send event data"                        \
     );                                                  \
+    if(ret < 0) return 0;                               \
 }
 
 static const uint32_t btn_codes[] = 
@@ -60,21 +73,22 @@ static const uint32_t btn_codes[] =
     BTN_Z
 };
 
-void process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
+int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
 {
-    uint8_t report_type = 0;
+    int ret = 0;
     size_t i = 0;
+    uint8_t report_type = 0;
     struct input_event ev;
 
     VALIDATE(data != NULL, "cannot process NULL data");
     VALIDATE(pad_device >= 0, "invalid virtual pad device");
     VALIDATE(pen_device >= 0, "invalid virtual pen device");
 
-    if(size < REPORT_SIZE || data[0] != REPORT_LEADING_BYTE) return;
+    if(size < REPORT_SIZE || data[0] != REPORT_LEADING_BYTE) return 0;
     report_type = data[1];
 
     // If you received a pen report...
-    if(report_type & REPORT_PEN_MASK)
+    if(CHECK_MASK(report_type, REPORT_PEN_MASK))
     {
         // If it's in range, send its coordinates and status to the virtual pen
         if(report_type & REPORT_PEN_IN_RANGE_MASK)
@@ -84,7 +98,7 @@ void process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen
             SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_Y, FORM_24BIT(data[9], data[5], data[4]));
 
             // Send pressure readings
-            SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_Y, FORM_24BIT(0, data[7], data[6]));
+            SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_PRESSURE, FORM_24BIT(0, data[7], data[6]));
 
             // Send tilt readinds
             SEND_INPUT_EVENT(pen_device, EV_ABS, ABS_TILT_X, (int8_t)data[10]);
@@ -124,7 +138,7 @@ void process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen
             SEND_INPUT_EVENT(pad_device, EV_ABS, ABS_MISC, btns_pressed ? 15 : 0)
 
             // Go through all the bits of btns_pressed
-            for(i = 0; i < sizeof(btns_pressed * 8); btns_pressed >>=1, i++)
+            for(i = 0; i < (sizeof(btns_pressed) *8); btns_pressed >>=1, i++)
                 SEND_INPUT_EVENT(pad_device, EV_KEY, btn_codes[i], btns_pressed & 0x01);
             
             // Also dunno what this is for
@@ -146,7 +160,7 @@ void process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen
         }
         
         default:
-            return;
+            return 0;
         }
     }
 }

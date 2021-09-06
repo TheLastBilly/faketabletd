@@ -38,6 +38,6 @@
 int create_virtual_pad(struct input_id *id, const char *name);
 int create_virtual_pen(struct input_id *id, const char *name);
 
-void process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device);
+int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device);
 
 #endif

@@ -127,14 +127,20 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, stru
 
 static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 {
+    int _ret = 0;
     bool error_found = true;
     VALIDATE(transfer != NULL, "cannot process null transfer");
     
     switch (transfer->status)
     {
     case LIBUSB_TRANSFER_COMPLETED:
-        process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
-        __USB_CATCHER(error_found = libusb_submit_transfer(transfer) >= 0, "cannot resubmit event transfer");
+        _ret = process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
+        if(!(error_found = _ret < 0))
+        {
+            libusb_submit_transfer(transfer);
+            __USB_CATCHER(_ret, "cannot resubmit event transfer");
+            error_found = _ret < 0;
+        }
         break;
     
     // Taken from https://github.com/DIGImend/digimend-userspace-drivers/blob/main/src/dud-translate.c

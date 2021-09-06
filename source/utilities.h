@@ -89,4 +89,6 @@ extern int errno;
         return _v;                                                          \
     }
 
+#define CHECK_MASK(_value, _mask) (((_value) & (_mask)) == 0)
+
 #endif
