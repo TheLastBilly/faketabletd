@@ -15,7 +15,7 @@
 int hs610_create_virtual_pad(struct input_id *id, const char *name);
 int hs610_create_virtual_pen(struct input_id *id, const char *name);
 
-int hs610_process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device);
+int hs610_process_raw_input(const struct raw_input_data_t *data);
 
 struct input_id *hs610_get_device_id();
 const char *hs610_get_pad_name();

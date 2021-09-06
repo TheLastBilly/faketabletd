@@ -45,7 +45,7 @@ static struct libusb_device_handle *device_handle;
 static struct libusb_device_descriptor descriptor;
 static struct libusb_transfer *device_transfer;
 static uint8_t *transfer_buffer;
-static volatile int pen_device, pad_device;
+static volatile int pen_device, pad_device, mouse_device;
 static size_t devices_detected;
 
 // Device info callbacks
@@ -84,8 +84,8 @@ static inline int create_virtual_pad(struct input_id *id, const char *name)
 static inline int create_virtual_pen(struct input_id *id, const char *name)
 { USE_RETURNING_CALLBACK(create_virtual_pen_callback, id, name); }
 
-static inline int process_raw_input(const uint8_t *data, size_t size, int pad_device, int pen_device)
-{ USE_RETURNING_CALLBACK(process_raw_input_callback, data, size, pad_device, pen_device); }
+static inline int process_raw_input(const struct raw_input_data_t *data)
+{ USE_RETURNING_CALLBACK(process_raw_input_callback, data); }
 
 // Signal handlers
 static void sigint_handler(int sig)
@@ -130,6 +130,50 @@ static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
     }
 
     return NULL;
+}
+
+// We use this to simulate mouse scroll events for the scroll wheel
+static int create_virtual_mouse()
+{
+    int ret = 0;
+    struct uinput_setup input_setup = (struct uinput_setup){};
+
+    __STD_CATCHER_CRITICAL(
+        mouse_device = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS),
+        "cannot open virtual mouse file"
+    );
+
+#define __IOCTL( ...) ret = ioctl(mouse_device, __VA_ARGS__); if(ret < 0) break;
+    do
+    {
+        // Setup mouse events, buttons, scroll wheel and movement
+        __IOCTL(UI_SET_EVBIT, EV_KEY);
+        __IOCTL(UI_SET_KEYBIT, BTN_LEFT);
+        __IOCTL(UI_SET_KEYBIT, BTN_RIGHT);
+        __IOCTL(UI_SET_KEYBIT, BTN_MIDDLE);
+        __IOCTL(UI_SET_EVBIT, EV_REL);
+        __IOCTL(UI_SET_RELBIT, REL_X);
+        __IOCTL(UI_SET_RELBIT, REL_Y);
+        __IOCTL(UI_SET_RELBIT, REL_WHEEL);
+        __IOCTL(UI_SET_RELBIT, REL_WHEEL_HI_RES);
+
+        input_setup.id.bustype = BUS_USB;
+        input_setup.id.vendor = 0x1234;
+        input_setup.id.product = 0x5678;
+        strcpy(input_setup.name, "Example device");
+
+        __IOCTL(UI_DEV_SETUP, &input_setup);
+        __IOCTL(UI_DEV_CREATE);
+
+    } while (0);
+#undef __IOCTL
+    if(ret < 0)
+    {
+        close(mouse_device);
+        __STD_CATCHER_CRITICAL(ret, "error creating virtual mouse");
+    }
+    
+    return mouse_device;
 }
 
 static void claim_interface_for_handle(struct libusb_device_handle *handle, struct interface_status_t *interface)
@@ -180,13 +224,23 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 {
     int ret = 0;
     bool error_found = true;
+    struct raw_input_data_t raw_input_data;
     
     if(transfer == NULL || get_should_close()) return;
     
     switch (transfer->status)
     {
     case LIBUSB_TRANSFER_COMPLETED:
-        ret = process_raw_input(transfer->buffer, transfer->actual_length, pad_device, pen_device);
+        raw_input_data = (struct raw_input_data_t){
+            .data = transfer->buffer,
+            .size = transfer->actual_length,
+
+            .pad_device = pad_device,
+            .pen_device = pen_device,
+
+            .mouse_device = mouse_device
+        };
+        ret = process_raw_input(&raw_input_data);
         if(!(error_found = ret < 0))
         {
             libusb_submit_transfer(transfer);
@@ -233,6 +287,7 @@ static void cleannup(void)
     set_should_close(false);
     set_should_reset(true);
 
+    CLOSE_UINPUT_DEVICE(mouse_device);
     CLOSE_UINPUT_DEVICE(pen_device);
     CLOSE_UINPUT_DEVICE(pad_device);
 
@@ -345,6 +400,7 @@ int main(int argc, char const *argv[])
 
     pen_device          = -1;
     pad_device          = -1;
+    mouse_device        = -1;
 
     descriptor = (struct libusb_device_descriptor){};
 
@@ -401,6 +457,10 @@ int main(int argc, char const *argv[])
         // Create virtual pen and pad
         pad_device = create_virtual_pad(get_input_id(), get_pad_name());
         pen_device = create_virtual_pen(get_input_id(), get_pen_name());
+    
+#ifdef FAKETABLETD_USE_VIRTUAL_MOUSE
+        mouse_device = create_virtual_mouse();
+#endif
 
         // Allocate space for tranfer callback
         transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));

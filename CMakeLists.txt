@@ -23,6 +23,9 @@ file(GLOB SOURCES
 add_executable(${PROJECT_NAME} 
 	${SOURCES}
 )
+target_compile_definitions(${PROJECT_NAME}
+	PRIVATE FAKETABLETD_USE_VIRTUAL_MOUSE
+)
 
 target_link_libraries(${PROJECT_NAME}  
 	${libusb_LIBRARIES}

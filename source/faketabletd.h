@@ -30,9 +30,20 @@
 
 #define FAKETABLETD_UINTPUT_OFLAGS  (O_WRONLY | O_NONBLOCK)
 
+struct raw_input_data_t
+{
+    const uint8_t *data;
+    size_t size;
+
+    int pad_device;
+    int pen_device;
+
+    int mouse_device;
+};
+
 typedef const char *(*get_name_callback_t) (void);
 typedef struct input_id *(*get_input_id_callback_t) (void);
 typedef int (*create_virtual_device_callback_t)(struct input_id *id, const char *name);
-typedef int (*process_raw_input_callback_t)(const uint8_t *data, size_t size, int pad_device, int pen_device);
+typedef int (*process_raw_input_callback_t)(const struct raw_input_data_t *raw_input_data);
 
 #endif
