@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <string.h>
 
 #include <sys/types.h>
 
@@ -10,10 +11,8 @@
 #include "faketabletd.h"
 #include "utilities.h"
 
-// Get the lenght of an array
-#define GET_LEN(arr) (sizeof(arr)/sizeof(arr[0]))
-
 #define SET_ABS_PROPERTY(_code, _value, _min, _max, _res)   \
+    abs_setup = (struct uinput_abs_setup){};                \
     abs_setup.code = _code;                                 \
     abs_setup.absinfo.value = _value;                       \
     abs_setup.absinfo.minimum = _min;                       \
@@ -71,13 +70,11 @@ int create_virtual_pen(struct input_id *id, const char *name)
     struct uinput_setup uinput_setup;
     struct uinput_abs_setup abs_setup;
 
-    if(id == NULL)
-        return -1;
-
+    VALIDATE(id != NULL, "cannot use invalid id for pen");
     do
     {
         fd = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS);
-        if(fd < 0) return fd;
+        if(fd < 0) { ret = fd; break; }
 
         // Enable events
         size = GET_LEN(evt_codes);
@@ -109,10 +106,11 @@ int create_virtual_pen(struct input_id *id, const char *name)
         SET_ABS_PROPERTY(ABS_TILT_Y, 0, -60, 60, 0);    if(ret < 0) break;
         
         // Make sure the name is not too long for the setup
-        size  = GET_LEN(name);
+        size  = strlen(name);
         size = size > GET_LEN(uinput_setup.name) ? GET_LEN(uinput_setup.name) : size;
 
         // Assing id and name to virtual device
+        uinput_setup = (struct uinput_setup){};
         memcpy(uinput_setup.name, name, size);
         memcpy(&uinput_setup.id, id, sizeof(struct input_id));
         ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup); if(ret < 0) break;
