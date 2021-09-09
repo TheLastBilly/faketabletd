@@ -49,11 +49,6 @@ static uint8_t *transfer_buffer;
 static volatile int pen_device, pad_device, mouse_device;
 static size_t devices_detected;
 
-// Device info callbacks
-get_name_callback_t get_pad_name_callback;
-get_name_callback_t get_pen_name_callback;
-get_input_id_callback_t get_input_id_callback;
-
 // Device setup callbacks
 create_virtual_device_callback_t create_virtual_pad_callback;
 create_virtual_device_callback_t create_virtual_pen_callback;
@@ -73,13 +68,6 @@ struct interface_status_t
 static struct interface_status_t interface_0, interface_1;
 
 // Callback handlers
-static inline struct input_id * get_input_id()
-{ USE_RETURNING_CALLBACK(get_input_id_callback); }
-static inline const char *get_pad_name()
-{ USE_RETURNING_CALLBACK(get_pad_name_callback); }
-static inline const char *get_pen_name()
-{ USE_RETURNING_CALLBACK(get_pen_name_callback); }
-
 static inline int create_virtual_pad(struct input_id *id, const char *name)
 { USE_RETURNING_CALLBACK(create_virtual_pad_callback, id, name); }
 static inline int create_virtual_pen(struct input_id *id, const char *name)
@@ -88,20 +76,28 @@ static inline int create_virtual_pen(struct input_id *id, const char *name)
 static inline int process_raw_input(const struct raw_input_data_t *data)
 { USE_RETURNING_CALLBACK(process_raw_input_callback, data); }
 
+// faketablet id
+static const struct input_id faketabletd_id = (const struct input_id){
+    .bustype    = BUS_USB,
+    .vendor     = FAKETABLETD_VID,
+    .product    = FAKETABLETD_PID,
+    .version    = FAKETABLETD_VERSION,
+};
+
 // Signal handlers
 static void sigint_handler(int sig)
 {
     __INFO("SIGINT detected, terminating...");
-    exit(0);
+    set_should_close(true);
 }
-static inline void sigterm_handler(int sig)
+static void sigterm_handler(int sig)
 {
-    exit(0);
+    set_should_close(true);
 }
 
 // Device name for the specified vendor and product id. Return NULL if
 // the specified device is not supported
-static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
+static const char *setup_device(uint16_t vendor_id, uint16_t product_id)
 {
     switch (vendor_id)
     {
@@ -112,10 +108,6 @@ static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
             {
             case USB_DEVICE_ID_HUION_TABLET:
             case USB_DEVICE_ID_HUION_HS610:
-                get_input_id_callback = &hs610_get_device_id;
-                get_pad_name_callback = &hs610_get_pad_name;
-                get_pen_name_callback = &hs610_get_pen_name;
-
                 create_virtual_pad_callback = &generic_create_virtual_pad;
                 create_virtual_pen_callback = &generic_create_virtual_pen;
                 process_raw_input_callback = &hs610_process_raw_input;
@@ -159,9 +151,9 @@ static int create_virtual_mouse()
         __IOCTL(UI_SET_RELBIT, REL_WHEEL_HI_RES);
 
         input_setup.id.bustype = BUS_USB;
-        input_setup.id.vendor = 0x1234;
-        input_setup.id.product = 0x5678;
-        strcpy(input_setup.name, "Example device");
+        input_setup.id.vendor = 0x1233;
+        input_setup.id.product = FAKETABLETD_VID;
+        strcpy(input_setup.name, FAKETABLETD_NAME " Mouse");
 
         __IOCTL(UI_DEV_SETUP, &input_setup);
         __IOCTL(UI_DEV_CREATE);
@@ -347,10 +339,6 @@ static void cleannup(void)
         usb_context = NULL;
     }
 
-    get_pad_name_callback = NULL;
-    get_pen_name_callback = NULL;
-    get_input_id_callback = NULL;
-
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
     process_raw_input_callback = NULL;
@@ -412,10 +400,6 @@ int main(int argc, char const **argv)
     device_handle       = NULL;
     device_transfer     = NULL;
     transfer_buffer     = NULL;
-
-    get_pad_name_callback = NULL;
-    get_pen_name_callback = NULL;
-    get_input_id_callback = NULL;
 
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
@@ -511,8 +495,8 @@ int main(int argc, char const **argv)
         );
 
         // Create virtual pen and pad
-        pad_device = create_virtual_pad(get_input_id(), get_pad_name());
-        pen_device = create_virtual_pen(get_input_id(), get_pen_name());
+        pad_device = create_virtual_pad((struct input_id *)&faketabletd_id, FAKETABLETD_NAME " Pad");
+        pen_device = create_virtual_pen((struct input_id *)&faketabletd_id, FAKETABLETD_NAME " Pen");
     
         if(use_virtual_mouse)
             mouse_device = create_virtual_mouse();

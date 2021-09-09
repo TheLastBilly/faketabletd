@@ -5,6 +5,12 @@
 #include <stdint.h>
 #include <linux/hid.h>
 
+// Fake device info
+#define FAKETABLETD_VID             0x5FE1
+#define FAKETABLETD_PID             0x1234
+#define FAKETABLETD_NAME            "FaketabletD"
+#define FAKETABLETD_VERSION         0x0001
+
 // Taken from https://github.com/DIGImend/digimend-kernel-drivers/blob/master/hid-ids.h
 #define USB_VENDOR_ID_HUION		    0x256c
 #define USB_DEVICE_ID_HUION_TABLET	0x006e
@@ -41,8 +47,6 @@ struct raw_input_data_t
     int mouse_device;
 };
 
-typedef const char *(*get_name_callback_t) (void);
-typedef struct input_id *(*get_input_id_callback_t) (void);
 typedef int (*create_virtual_device_callback_t)(struct input_id *id, const char *name);
 typedef int (*process_raw_input_callback_t)(const struct raw_input_data_t *raw_input_data);
 

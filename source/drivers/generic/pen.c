@@ -102,7 +102,7 @@ int generic_create_virtual_pen(struct input_id *id, const char *name)
         uinput_setup = (struct uinput_setup){};
         memcpy(uinput_setup.name, name, size);
         memcpy(&uinput_setup.id, id, sizeof(struct input_id));
-        ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup); if(ret < 0) break;
+        ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup);   if(ret < 0) break;
 
         // Create the virtual device
         ret = ioctl(fd, UI_DEV_CREATE);                 if(ret < 0) break;

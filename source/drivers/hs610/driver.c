@@ -1,5 +1,7 @@
 #include "drivers/hs610/hs610.h"
 
+#define DEVICE_NAME "HS610"
+
 // This is the size of the data that we are expecting to receive.
 // You can actually observe it in realtime by using the usbhid-dump command
 // ie: sudo usbhid-dump -es -m [your device's VID]
@@ -73,6 +75,11 @@ static const uint32_t btn_codes[] =
     BTN_Y, 
     BTN_Z
 };
+
+const char *hs610_get_device_name()
+{
+    return DEVICE_NAME;
+}
 
 int hs610_process_raw_input(const struct raw_input_data_t *data)
 {
