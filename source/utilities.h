@@ -8,6 +8,10 @@
 
 #include <libusb-1.0/libusb.h>
 
+#ifndef uint
+#define uint unsigned int
+#endif
+
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
 // Loggers
@@ -50,7 +54,7 @@
 #define __STD_CATCHER(_expr, _fmt, _args...)                                \
     __BASE_CATCHER(_expr, _fmt ":", strerror(_ret), ##_args)
 #define __STD_CATCHER_CRITICAL(_expr, _fmt, _args...)                       \
-    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(errno), ##_args)
+    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(_ret), ##_args)
 
 #define VALIDATE(_expr, _fmt, _args...) __CATCHER_CRITICAL((_expr) ? 0 : -1, _fmt, ##_args);
 
@@ -90,5 +94,8 @@ extern int errno;
     }
 
 #define CHECK_MASK(_value, _mask) (((_value) & (_mask)) == 0)
+
+#define MAX(a, b) ((a) >= (b) ? (a): (b))
+#define MIN(a, b) ((a) <= (b) ? (a): (b))
 
 #endif

@@ -17,6 +17,7 @@
 #include <libusb-1.0/libusb.h>
 
 #include "faketabletd.h"
+#include "ini.h"
 #include "utilities.h"
 
 #include "drivers/hs610/hs610.h"
@@ -415,6 +416,12 @@ int main(int argc, char const **argv)
     should_reset = false;
 
     const char* device_name = NULL;
+
+    ini_register_item(0, INI_TYPE_STRING, "entry");
+    ini_parse_file("./config.ini");
+    const char* item = ini_get_item(0, const char*);
+    __INFO("%s", item);
+    return 0;
 
     // Make sure we catch Ctrl-C when asked to terminate
     signal(SIGINT, sigint_handler);
