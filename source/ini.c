@@ -4,23 +4,23 @@
 #include "ini.h"
 #include "utilities.h"
 
-#define CHECK_IF_OUT_OF_BOUNDS(index_, rtn_)                        \
-{                                                                   \
-    if(index_ >= sizeof(ini_items_)/sizeof(struct ini_item_t))      \
-    {                                                               \
-        __ERROR("index out of bounds");                             \
-        return rtn_;                                                \
-    }                                                               \
+#define CHECK_IF_OUT_OF_BOUNDS(index_, rtn_)                                    \
+{                                                                               \
+    if(index_ >= sizeof(ini_items_)/sizeof(struct ini_item_t) || index_ < 0)    \
+    {                                                                           \
+        __ERROR("index out of bounds");                                         \
+        return rtn_;                                                            \
+    }                                                                           \
 }
-#define BAD_TYPE_ERROR()                                            \
-{                                                                   \
-    __ERROR("unspecified type");                                    \
-    return -1;                                                      \
+#define BAD_TYPE_ERROR()                                                        \
+{                                                                               \
+    __ERROR("unspecified type");                                                \
+    return -1;                                                                  \
 }
-#define APPLY_TO_STATIC_STRING(ssrc_, dsrc_)                        \
-{                                                                   \
-    uint s_ = MIN(GET_LEN(ssrc_), strlen(dsrc_));                   \
-    memcpy(ssrc_, dsrc_, s_);                                       \
+#define APPLY_TO_STATIC_STRING(ssrc_, dsrc_)                                    \
+{                                                                               \
+    uint s_ = MIN(GET_LEN(ssrc_), strlen(dsrc_));                               \
+    memcpy(ssrc_, dsrc_, s_);                                                   \
 }
 
 struct ini_item_t ini_items_[] = {};
@@ -61,17 +61,17 @@ int ini_register_item(int index, int type, const char *label)
 void *ini_get_item_(int index)
 {
     CHECK_IF_OUT_OF_BOUNDS(index, NULL);
+    struct ini_item_t *item = &ini_items_[index];
 
-    switch (ini_items_[index].type)
+    item->_data = &item->_generic;
+    switch (item->type)
     {
     case INI_TYPE_INT:
-        return (void *)&ini_items_[index].integer;
     case INI_TYPE_FLOAT:
-        return (void *)&ini_items_[index].floating;
+        return item->_data;
     case INI_TYPE_STRING:
-        return (void *)&ini_items_[index].string;
+        return &item->_data;
     default:
-        return NULL;
         break;
     }
 
@@ -162,7 +162,6 @@ int ini_parse_file(const char *file_path)
         __WARNING("invalid entry %s:%d",file_path, line_number);        \
         continue;                                                       \
     }
-
     while(fgets(line, sizeof(line), fp))
     {
         // Get label
@@ -179,8 +178,8 @@ int ini_parse_file(const char *file_path)
 
         line_number++;
     }
-
 #undef FIND_COMPONENT
+
     fclose(fp);
     return 0;
 }

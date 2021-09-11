@@ -20,13 +20,17 @@ struct ini_item_t
         int     integer;
         float   floating;
         char    string[20];
+
+        void    *_generic;
     };
+
+    void        *_data;
 };
 
-struct ini_item_t ini_items_[INI_BUFFER_SIZE];
+extern struct ini_item_t ini_items_[INI_BUFFER_SIZE];
 
 #define ini_get_items()             (ini_items_)
-#define ini_get_item(index, type)   (*((type*)(ini_get_item_(index))))
+#define ini_get_item(index, type)   (*((type*)ini_get_item_(index)))
 
 void ini_clear_items();
 
