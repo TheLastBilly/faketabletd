@@ -97,7 +97,7 @@ int simulate_key_presses(int fd, const char keys[INI_STRING_SIZE])
 
 #define MAKE_KEY_PRESSES(_in)                                           \
     size = 0;                                                           \
-    while(size < INI_BUTTON_MAX)                                        \
+    while(size < INI_STRING_SIZE)                                       \
         SEND_INPUT_EVENT(fd, EV_KEY, get_key_code(keys[size++]), _in);  \
     SEND_REPORT(fd);
 
