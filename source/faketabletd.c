@@ -453,12 +453,8 @@ static void read_config()
         return;
     
     __INFO("detected configuration file on \"%s\"", str);
-    if(ini_parse_file(str) != 0)
-    {
-        __ERROR("cannot parse file \"%s\"", str);
-        set_should_use_config(false);
-        return;
-    }
+    set_should_use_config(false);
+    __CATCHER_CRITICAL(ini_parse_file(str), "cannot parse file \"%s\"", str);
     __INFO("loaded configuration from \"%s\" successfuly", str);
 
     for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
