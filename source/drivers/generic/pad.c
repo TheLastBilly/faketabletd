@@ -1,4 +1,4 @@
-#include "drivers/hs610/hs610.h"
+#include "drivers/generic/generic.h"
 
 #define SET_ABS_PROPERTY(_code, _value, _min, _max) \
     abs_setup = (struct uinput_abs_setup){};        \
@@ -41,7 +41,7 @@ static const int abs_codes[] =
     ABS_MISC
 };
 
-int hs610_create_virtual_pad(struct input_id *id, const char *name)
+int generic_create_virtual_pad(struct input_id *id, const char *name)
 {
     int fd = -1, ret = 0;
     size_t size = 0, i = 0;

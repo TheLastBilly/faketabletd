@@ -1,5 +1,7 @@
 #include "drivers/hs610/hs610.h"
 
+#define DEVICE_NAME "HS610"
+
 // This is the size of the data that we are expecting to receive.
 // You can actually observe it in realtime by using the usbhid-dump command
 // ie: sudo usbhid-dump -es -m [your device's VID]
@@ -74,10 +76,15 @@ static const uint32_t btn_codes[] =
     BTN_Z
 };
 
+const char *hs610_get_device_name()
+{
+    return DEVICE_NAME;
+}
+
 int hs610_process_raw_input(const struct raw_input_data_t *data)
 {
     int ret = 0;
-    size_t i = 0;
+    size_t i = 0, x = 0;
     uint8_t report_type = 0;
     struct input_event ev = (struct input_event){};
 
@@ -148,6 +155,47 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
             // Go through all the bits of btns_pressed
             for(i = 0; i < (sizeof(btns_pressed) *8); btns_pressed >>=1, i++)
                 SEND_INPUT_EVENT(data->pad_device, EV_KEY, btn_codes[i], btns_pressed & 0x01);
+            
+            if(data->config_available && data->keyboard_device >= 0)
+            {
+                btns_pressed = FORM_16BIT(data->data[5], data->data[4]);
+
+                for(i = 0; i < (sizeof(btns_pressed) *8); btns_pressed >>=1, i++)
+                {
+                    if(!(btns_pressed & 0x01)) continue;
+
+                #define CATCH_BUTTON(_id, _b)                   \
+                    case _id:                                   \
+                        x = _b;                                 \
+                        break;
+                    switch (i)
+                    {
+                        CATCH_BUTTON(0, INI_BUTTON_1_INDEX);
+                        CATCH_BUTTON(1, INI_BUTTON_2_INDEX);
+                        CATCH_BUTTON(2, INI_BUTTON_3_INDEX);
+                        CATCH_BUTTON(3, INI_BUTTON_4_INDEX);
+                        CATCH_BUTTON(4, INI_BUTTON_5_INDEX);
+                        CATCH_BUTTON(5, INI_BUTTON_6_INDEX);
+                        CATCH_BUTTON(6, INI_BUTTON_7_INDEX);
+                        CATCH_BUTTON(7, INI_BUTTON_8_INDEX);
+                        CATCH_BUTTON(8, INI_BUTTON_9_INDEX);
+                        CATCH_BUTTON(9, INI_BUTTON_10_INDEX);
+                        CATCH_BUTTON(10, INI_BUTTON_11_INDEX);
+                        CATCH_BUTTON(11, INI_BUTTON_12_INDEX);
+                        CATCH_BUTTON(12, INI_BUTTON_13_INDEX);
+                        CATCH_BUTTON(13, INI_BUTTON_14_INDEX);
+                        CATCH_BUTTON(14, INI_BUTTON_15_INDEX);
+                        CATCH_BUTTON(15, INI_BUTTON_16_INDEX);
+                    default:
+                        break;
+                    }
+                #undef CATCH_BUTTON
+
+                    if(ini_item_is_populated(x) && (ret = simulate_key_presses(data->keyboard_device, 
+                        ini_get_item(x, const char *)
+                    )) < 0) return ret;
+                }
+            }
             
             // Also dunno what this is for
             SEND_INPUT_EVENT(data->pad_device, EV_SYN, SYN_REPORT, 1);

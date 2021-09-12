@@ -1,4 +1,4 @@
-#include "drivers/hs610/hs610.h"
+#include "drivers/generic/generic.h"
 
 #define SET_ABS_PROPERTY(_code, _value, _min, _max, _res)   \
     abs_setup = (struct uinput_abs_setup){};                \
@@ -52,7 +52,7 @@ static const uint8_t abs_codes[] =
     ABS_MISC
 };
 
-int hs610_create_virtual_pen(struct input_id *id, const char *name)
+int generic_create_virtual_pen(struct input_id *id, const char *name)
 {
     int fd = -1, ret = 0;
     size_t size = 0, i = 0;
@@ -102,7 +102,7 @@ int hs610_create_virtual_pen(struct input_id *id, const char *name)
         uinput_setup = (struct uinput_setup){};
         memcpy(uinput_setup.name, name, size);
         memcpy(&uinput_setup.id, id, sizeof(struct input_id));
-        ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup); if(ret < 0) break;
+        ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup);   if(ret < 0) break;
 
         // Create the virtual device
         ret = ioctl(fd, UI_DEV_CREATE);                 if(ret < 0) break;

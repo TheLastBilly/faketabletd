@@ -46,13 +46,8 @@ static struct libusb_device_handle *device_handle;
 static struct libusb_device_descriptor descriptor;
 static struct libusb_transfer *device_transfer;
 static uint8_t *transfer_buffer;
-static volatile int pen_device, pad_device, mouse_device;
+static volatile int pen_device, pad_device, mouse_device, keyboard_device;
 static size_t devices_detected;
-
-// Device info callbacks
-get_name_callback_t get_pad_name_callback;
-get_name_callback_t get_pen_name_callback;
-get_input_id_callback_t get_input_id_callback;
 
 // Device setup callbacks
 create_virtual_device_callback_t create_virtual_pad_callback;
@@ -63,6 +58,7 @@ process_raw_input_callback_t process_raw_input_callback;
 
 REGISTER_MUTEX_VARIABLE(bool, should_close);
 REGISTER_MUTEX_VARIABLE(bool, should_reset);
+REGISTER_MUTEX_VARIABLE(bool, should_use_config);
 
 struct interface_status_t
 {
@@ -73,13 +69,6 @@ struct interface_status_t
 static struct interface_status_t interface_0, interface_1;
 
 // Callback handlers
-static inline struct input_id * get_input_id()
-{ USE_RETURNING_CALLBACK(get_input_id_callback); }
-static inline const char *get_pad_name()
-{ USE_RETURNING_CALLBACK(get_pad_name_callback); }
-static inline const char *get_pen_name()
-{ USE_RETURNING_CALLBACK(get_pen_name_callback); }
-
 static inline int create_virtual_pad(struct input_id *id, const char *name)
 { USE_RETURNING_CALLBACK(create_virtual_pad_callback, id, name); }
 static inline int create_virtual_pen(struct input_id *id, const char *name)
@@ -88,20 +77,36 @@ static inline int create_virtual_pen(struct input_id *id, const char *name)
 static inline int process_raw_input(const struct raw_input_data_t *data)
 { USE_RETURNING_CALLBACK(process_raw_input_callback, data); }
 
+// faketablet id
+static const struct input_id faketabletd_id = (const struct input_id)
+{
+    .bustype    = BUS_USB,
+    .vendor     = FAKETABLETD_VID,
+    .product    = FAKETABLETD_PID,
+    .version    = FAKETABLETD_VERSION,
+};
+static const struct input_id wacom_id = (const struct input_id)
+{
+    .bustype    = BUS_USB,
+    .vendor     = 0x056a,
+    .product    = 0x0314,
+    .version    = 0x0110,
+};
+
 // Signal handlers
 static void sigint_handler(int sig)
 {
     __INFO("SIGINT detected, terminating...");
-    exit(0);
+    set_should_close(true);
 }
-static inline void sigterm_handler(int sig)
+static void sigterm_handler(int sig)
 {
-    exit(0);
+    set_should_close(true);
 }
 
 // Device name for the specified vendor and product id. Return NULL if
 // the specified device is not supported
-static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
+static const char *setup_device(uint16_t vendor_id, uint16_t product_id)
 {
     switch (vendor_id)
     {
@@ -112,12 +117,8 @@ static const char * setup_device(uint16_t vendor_id, uint16_t product_id)
             {
             case USB_DEVICE_ID_HUION_TABLET:
             case USB_DEVICE_ID_HUION_HS610:
-                get_input_id_callback = &hs610_get_device_id;
-                get_pad_name_callback = &hs610_get_pad_name;
-                get_pen_name_callback = &hs610_get_pen_name;
-
-                create_virtual_pad_callback = &hs610_create_virtual_pad;
-                create_virtual_pen_callback = &hs610_create_virtual_pen;
+                create_virtual_pad_callback = &generic_create_virtual_pad;
+                create_virtual_pen_callback = &generic_create_virtual_pen;
                 process_raw_input_callback = &hs610_process_raw_input;
                 return hs610_get_device_name();
             default:
@@ -159,9 +160,9 @@ static int create_virtual_mouse()
         __IOCTL(UI_SET_RELBIT, REL_WHEEL_HI_RES);
 
         input_setup.id.bustype = BUS_USB;
-        input_setup.id.vendor = 0x1234;
-        input_setup.id.product = 0x5678;
-        strcpy(input_setup.name, "Example device");
+        input_setup.id.vendor = 0x1233;
+        input_setup.id.product = FAKETABLETD_VID;
+        strcpy(input_setup.name, FAKETABLETD_NAME " Mouse");
 
         __IOCTL(UI_DEV_SETUP, &input_setup);
         __IOCTL(UI_DEV_CREATE);
@@ -177,14 +178,58 @@ static int create_virtual_mouse()
     return mouse_device;
 }
 
+// We use this to simulate keyboard presses
+static int create_virtual_keyboard()
+{
+    int ret = 0;
+    struct uinput_setup input_setup = (struct uinput_setup){};
+
+    __STD_CATCHER_CRITICAL(
+        keyboard_device = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS),
+        "cannot open virtual keyboard file"
+    );
+
+#define __IOCTL( ...) ret = ioctl(keyboard_device, __VA_ARGS__); if(ret < 0) break;
+    do
+    {
+        // Setup mouse events, buttons, scroll wheel and movement
+        __IOCTL(UI_SET_EVBIT, EV_KEY);
+        for(int i = KEY_RESERVED; i < KEY_F24; i++)
+        { __IOCTL(UI_SET_KEYBIT, i); }
+
+        input_setup.id.bustype = BUS_USB;
+        input_setup.id.vendor = 0x1232;
+        input_setup.id.product = FAKETABLETD_VID;
+        strcpy(input_setup.name, FAKETABLETD_NAME " Keyboard");
+
+        __IOCTL(UI_DEV_SETUP, &input_setup);
+        __IOCTL(UI_DEV_CREATE);
+
+    } while (0);
+#undef __IOCTL
+
+    if(ret < 0)
+    {
+        close(keyboard_device);
+        __STD_CATCHER_CRITICAL(ret, "error creating virtual keyboard");
+    }
+    
+    return keyboard_device;
+}
+
 static void claim_interface_for_handle(struct libusb_device_handle *handle, struct interface_status_t *interface)
 {
     int ret = 0;
     // Detach interface from the kernel and claim it for ourselves
-    ret  = libusb_detach_kernel_driver(handle, interface->number);
-    if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
-        __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d", interface->number);
-    interface->detached_from_kernel = true;
+    if(libusb_kernel_driver_active(handle, interface->number) == 1)
+    {
+        ret  = libusb_detach_kernel_driver(handle, interface->number);
+        if(ret < 0 && ret != LIBUSB_ERROR_NOT_FOUND)
+            __USB_CATCHER_CRITICAL(ret, "cannot detach kernel from interface %d", interface->number);
+        interface->detached_from_kernel = true;
+    }
+    else
+        interface->detached_from_kernel = false;
 
     __CATCHER_CRITICAL(libusb_claim_interface(handle, interface->number), "cannot claim interface %d", interface->number);
     interface->claimed = true;
@@ -239,7 +284,10 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
             .pad_device = pad_device,
             .pen_device = pen_device,
 
-            .mouse_device = mouse_device
+            .mouse_device = mouse_device,
+            .keyboard_device = keyboard_device,
+
+            .config_available = get_should_use_config()
         };
         ret = process_raw_input(&raw_input_data);
         if(!(error_found = ret < 0))
@@ -286,6 +334,7 @@ static void cleannup(void)
 
     set_should_close(false);
 
+    CLOSE_UINPUT_DEVICE(keyboard_device);
     CLOSE_UINPUT_DEVICE(mouse_device);
     CLOSE_UINPUT_DEVICE(pen_device);
     CLOSE_UINPUT_DEVICE(pad_device);
@@ -313,16 +362,16 @@ static void cleannup(void)
         interface_1.claimed = false;
     }
 
-    if(interface_1.detached_from_kernel)
-    {
-        libusb_attach_kernel_driver(device_handle, interface_1.number);
-        interface_1.detached_from_kernel = false;
-    }
-    if(interface_0.detached_from_kernel)
-    {
-        libusb_attach_kernel_driver(device_handle, interface_0.number);
-        interface_0.detached_from_kernel = false;
-    }
+    // if(interface_1.detached_from_kernel)
+    // {
+    //     libusb_attach_kernel_driver(device_handle, interface_1.number);
+    //     interface_1.detached_from_kernel = false;
+    // }
+    // if(interface_0.detached_from_kernel)
+    // {
+    //     libusb_attach_kernel_driver(device_handle, interface_0.number);
+    //     interface_0.detached_from_kernel = false;
+    // }
 
     if(device_handle != NULL)
     {
@@ -341,10 +390,6 @@ static void cleannup(void)
         libusb_exit(usb_context);
         usb_context = NULL;
     }
-
-    get_pad_name_callback = NULL;
-    get_pen_name_callback = NULL;
-    get_input_id_callback = NULL;
 
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
@@ -377,6 +422,54 @@ static bool look_for_devices(const char **device_name)
     return false;
 }
 
+static const char *get_home_config_file()
+{
+    static char path[60] = {0};
+
+    snprintf(path, 60, "%s/." CONFIG_FILE_NAME, getpwuid(getuid())->pw_dir);
+    return path;
+}
+
+static void read_config()
+{
+    int i = 0;
+    char label[INI_STRING_SIZE] = {0};
+    const char *str = NULL;
+
+    // Make sure config file data is empty, and register the expected items
+    ini_clear_items();
+
+    // Register buttons
+    for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
+    {
+        snprintf(label, INI_STRING_SIZE, "pad_button_%d", i+1);
+        ini_register_item(i, INI_TYPE_STRING, label);
+    }
+
+    // Look for a directory where a config file might be, and parse it if you found it
+    str = get_home_config_file();
+    const char *config_paths[] = { str, ETC_CONFIG_PATH };
+    if((str = check_paths(config_paths, 2)) == NULL)
+        return;
+    
+    if(ini_parse_file(str) != 0)
+    {
+        __ERROR("cannot parse file \"%s\"", str);
+        set_should_use_config(false);
+        return;
+    }
+
+    for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
+    {
+        if(!ini_item_is_populated(i)) continue;
+
+        str = ini_get_item(i, const char*);
+        __CATCHER_CRITICAL(validate_key_presses(str), "invalid binding on a config file \"%s\"", str);
+    }
+    
+    set_should_use_config(true);
+}
+
 static inline void print_help()
 {
     printf(
@@ -384,12 +477,14 @@ static inline void print_help()
         "User space driver for drawing tablets\n\n"
         
         "Options\n"
+        "  -w\t\t\tEnables wacom tablet simulation support\n"
         "  -m\t\t\tEnables virtual mouse emulation\n"
-        "  -s\t\t\tDisables reset on disconnect\n\n"
+        "  -k\t\t\tEnables virtual keyboard emulation\n"
+        "  -r\t\t\tResets the program back to the scanning phase on disconnect (experimental)\n\n"
 
         "Examples:\n"
         "  faketabletd -m\tRuns driver with virtual mouse emulation\n"
-        "  faketabletd -ms\tRuns driver with virtual mouse emulation. Will exit on disconnect\n"
+        "  faketabletd -mr\tRuns driver with virtual mouse emulation. Will no exit on disconnect\n"
     );
 }
 
@@ -397,7 +492,12 @@ int main(int argc, char const **argv)
 {
     // Local variables
     int ret = 0;
-    bool use_virtual_mouse = false;
+    bool 
+        use_virtual_mouse = false, 
+        use_virtual_keyboard = false,
+        use_wacom = false;
+    unsigned char descriptor_string[50] = {};
+    struct input_id *input_id;
 
     // Initialize locals
     usb_context         = NULL;
@@ -406,10 +506,6 @@ int main(int argc, char const **argv)
     device_handle       = NULL;
     device_transfer     = NULL;
     transfer_buffer     = NULL;
-
-    get_pad_name_callback = NULL;
-    get_pen_name_callback = NULL;
-    get_input_id_callback = NULL;
 
     create_virtual_pad_callback = NULL;
     create_virtual_pen_callback = NULL;
@@ -422,7 +518,7 @@ int main(int argc, char const **argv)
     descriptor = (struct libusb_device_descriptor){};
 
     should_close = false;
-    should_reset = true;
+    should_reset = false;
 
     const char* device_name = NULL;
 
@@ -430,19 +526,29 @@ int main(int argc, char const **argv)
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigterm_handler);
 
+    // Read config from config file
+    read_config();
+
     // Make sure we clean our mess before we leave
     atexit(cleannup);
 
     // Get argument options
-    while((ret = getopt(argc, (char* const*)argv, "msh")) != -1)
+    while((ret = getopt(argc, (char* const*)argv, "mrhkw")) != -1)
     {
         switch (ret)
         {
+        case 'w':
+            use_wacom = true;
+            break;
         case 'm':
             use_virtual_mouse = true;
             break;
-        case 's':
-            set_should_reset(false);
+        case 'k':
+            use_virtual_keyboard = true;
+            break;
+        case 'r':
+            set_should_reset(true);
+            __WARNING("-r has been set, this is an experimental feature and is known to cause problems");
             break;
         case 'h':
             print_help();
@@ -497,12 +603,25 @@ int main(int argc, char const **argv)
         claim_interface_for_handle(device_handle, &interface_0);
         claim_interface_for_handle(device_handle, &interface_1);
 
+        // Get string descriptor, don't know why, but digimend userspace does so...
+        __USB_CATCHER_CRITICAL(
+            libusb_get_string_descriptor(device_handle, 0xc8, 0x0409, descriptor_string, sizeof(descriptor_string)), 
+            "cannot get descriptor string"
+        );
+
         // Create virtual pen and pad
-        pad_device = create_virtual_pad(get_input_id(), get_pad_name());
-        pen_device = create_virtual_pen(get_input_id(), get_pen_name());
+        if(use_wacom)
+            input_id = (struct input_id *)&wacom_id;
+        else
+            input_id = (struct input_id *)&faketabletd_id;
+        
+        pad_device = create_virtual_pad(input_id, FAKETABLETD_NAME " Pad");
+        pen_device = create_virtual_pen(input_id, FAKETABLETD_NAME " Pen");
     
         if(use_virtual_mouse)
             mouse_device = create_virtual_mouse();
+        if(use_virtual_keyboard)
+            keyboard_device = create_virtual_keyboard();
 
         // Allocate space for tranfer callback
         transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));

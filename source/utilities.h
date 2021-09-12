@@ -3,10 +3,18 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 #include <errno.h>
 
 #include <libusb-1.0/libusb.h>
+
+#ifndef uint
+#define uint unsigned int
+#endif
 
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
@@ -50,7 +58,7 @@
 #define __STD_CATCHER(_expr, _fmt, _args...)                                \
     __BASE_CATCHER(_expr, _fmt ":", strerror(_ret), ##_args)
 #define __STD_CATCHER_CRITICAL(_expr, _fmt, _args...)                       \
-    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(errno), ##_args)
+    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(_ret), ##_args)
 
 #define VALIDATE(_expr, _fmt, _args...) __CATCHER_CRITICAL((_expr) ? 0 : -1, _fmt, ##_args);
 
@@ -90,5 +98,12 @@ extern int errno;
     }
 
 #define CHECK_MASK(_value, _mask) (((_value) & (_mask)) == 0)
+
+#define MAX(a, b) ((a) >= (b) ? (a): (b))
+#define MIN(a, b) ((a) <= (b) ? (a): (b))
+
+bool path_exits(const char *path);
+bool path_is_dir(const char *path);
+const char *check_paths(const char *paths[], int len);
 
 #endif
