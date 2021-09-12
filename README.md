@@ -3,6 +3,9 @@
 ### **THIS IS AN EXPERIMENTAL PROJECT, AND IT COULD POTENTIALY CAUSE SYSTEMWIDE CRASHES. USE IT AT YOUR OWN DISCRETION**
 A userspace driver for drawing tablets based on the [digimend-userspace-drivers](https://github.com/DIGImend/digimend-userspace-drivers) project. **faketabletd** is meant to support those tablets not currently supported by the **Digimend** project, as such, it should only be used as a last resort should there not be any kernel drivers available for your device.
 
+## Supported models
+### GAOMON M10K Pro
+
 ## Installation
 In order to use **faketabletd** you will need to compile this repository, as there are currently no binaries provided with the project.
 
@@ -54,6 +57,7 @@ This will run **faketabletd** in your terminal where it will start waiting for c
 ```
 
 You should now be able to use your tablet just like a regular wacom tablet.
+
 #### Options
 ```
 Usage: faketabletd [OPTION]
