@@ -452,12 +452,14 @@ static void read_config()
     if((str = check_paths(config_paths, 2)) == NULL)
         return;
     
+    __INFO("detected configuration file on \"%s\"", str);
     if(ini_parse_file(str) != 0)
     {
         __ERROR("cannot parse file \"%s\"", str);
         set_should_use_config(false);
         return;
     }
+    __INFO("loaded configuration from \"%s\" successfuly", str);
 
     for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
     {
@@ -526,11 +528,11 @@ int main(int argc, char const **argv)
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigterm_handler);
 
-    // Read config from config file
-    read_config();
-
     // Make sure we clean our mess before we leave
     atexit(cleannup);
+
+    // Read config from config file
+    read_config();
 
     // Get argument options
     while((ret = getopt(argc, (char* const*)argv, "mrhkw")) != -1)

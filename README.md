@@ -60,10 +60,12 @@ Usage: faketabletd [OPTION]
 User space driver for drawing tablets
 
 Options
+  -w                    Enables wacom tablet simulation support
   -m                    Enables virtual mouse emulation
+  -k                    Enables virtual keyboard emulation
   -r                    Resets the program back to the scanning phase on disconnect (experimental)
 
 Examples:
   faketabletd -m        Runs driver with virtual mouse emulation
-  faketabletd -mr       Runs driver with virtual mouse emulation. Will not exit on disconnect
+  faketabletd -mr       Runs driver with virtual mouse emulation. Will no exit on disconnect
 ```
