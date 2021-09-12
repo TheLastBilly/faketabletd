@@ -3,7 +3,12 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <pwd.h>
 #include <linux/hid.h>
+
+#include "ini.h"
 
 // Fake device info
 #define FAKETABLETD_VID             0x5FE1
@@ -34,8 +39,30 @@
 #define FAKETABLETD_UINPUT_PATH     "/dev/uinput"
 #endif
 
+#define CONFIG_FILE_NAME            "faketabletd.conf"
+#define ETC_CONFIG_PATH             ("/etc/" CONFIG_FILE_NAME)
+
 #define FAKETABLETD_UINTPUT_OFLAGS  (O_WRONLY | O_NONBLOCK)
 
+#define INI_BUTTON_1_INDEX          0
+#define INI_BUTTON_2_INDEX          1
+#define INI_BUTTON_3_INDEX          2
+#define INI_BUTTON_4_INDEX          3
+#define INI_BUTTON_5_INDEX          4
+#define INI_BUTTON_6_INDEX          5
+#define INI_BUTTON_7_INDEX          6
+#define INI_BUTTON_8_INDEX          7
+#define INI_BUTTON_9_INDEX          8
+#define INI_BUTTON_10_INDEX         9
+#define INI_BUTTON_11_INDEX         10
+#define INI_BUTTON_12_INDEX         11
+#define INI_BUTTON_13_INDEX         12
+#define INI_BUTTON_14_INDEX         13
+#define INI_BUTTON_15_INDEX         14
+#define INI_BUTTON_16_INDEX         15
+#define INI_BUTTON_MAX     (INI_BUTTON_16_INDEX + 1)
+
+// Object that we pass to the drivers
 struct raw_input_data_t
 {
     const uint8_t *data;
@@ -45,9 +72,15 @@ struct raw_input_data_t
     int pen_device;
 
     int mouse_device;
+    int keyboard_device;
+
+    bool config_available;
 };
 
 typedef int (*create_virtual_device_callback_t)(struct input_id *id, const char *name);
 typedef int (*process_raw_input_callback_t)(const struct raw_input_data_t *raw_input_data);
+
+bool validate_key_presses(const char keys[INI_STRING_SIZE]);
+int simulate_key_presses(int fd, const char keys[INI_STRING_SIZE]);
 
 #endif

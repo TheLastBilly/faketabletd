@@ -3,6 +3,10 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <time.h>
 #include <errno.h>
 
@@ -97,5 +101,9 @@ extern int errno;
 
 #define MAX(a, b) ((a) >= (b) ? (a): (b))
 #define MIN(a, b) ((a) <= (b) ? (a): (b))
+
+bool path_exits(const char *path);
+bool path_is_dir(const char *path);
+const char *check_paths(const char *paths[], int len);
 
 #endif

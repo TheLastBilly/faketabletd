@@ -17,7 +17,6 @@
 #include <libusb-1.0/libusb.h>
 
 #include "faketabletd.h"
-#include "ini.h"
 #include "utilities.h"
 
 #include "drivers/hs610/hs610.h"
@@ -47,7 +46,7 @@ static struct libusb_device_handle *device_handle;
 static struct libusb_device_descriptor descriptor;
 static struct libusb_transfer *device_transfer;
 static uint8_t *transfer_buffer;
-static volatile int pen_device, pad_device, mouse_device;
+static volatile int pen_device, pad_device, mouse_device, keyboard_device;
 static size_t devices_detected;
 
 // Device setup callbacks
@@ -59,6 +58,7 @@ process_raw_input_callback_t process_raw_input_callback;
 
 REGISTER_MUTEX_VARIABLE(bool, should_close);
 REGISTER_MUTEX_VARIABLE(bool, should_reset);
+REGISTER_MUTEX_VARIABLE(bool, should_use_config);
 
 struct interface_status_t
 {
@@ -78,7 +78,8 @@ static inline int process_raw_input(const struct raw_input_data_t *data)
 { USE_RETURNING_CALLBACK(process_raw_input_callback, data); }
 
 // faketablet id
-static const struct input_id faketabletd_id = (const struct input_id){
+static const struct input_id faketabletd_id = (const struct input_id)
+{
     .bustype    = BUS_USB,
     .vendor     = FAKETABLETD_VID,
     .product    = FAKETABLETD_PID,
@@ -170,6 +171,45 @@ static int create_virtual_mouse()
     return mouse_device;
 }
 
+// We use this to simulate keyboard presses
+static int create_virtual_keyboard()
+{
+    int ret = 0;
+    struct uinput_setup input_setup = (struct uinput_setup){};
+
+    __STD_CATCHER_CRITICAL(
+        keyboard_device = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS),
+        "cannot open virtual keyboard file"
+    );
+
+#define __IOCTL( ...) ret = ioctl(keyboard_device, __VA_ARGS__); if(ret < 0) break;
+    do
+    {
+        // Setup mouse events, buttons, scroll wheel and movement
+        __IOCTL(UI_SET_EVBIT, EV_KEY);
+        for(int i = KEY_RESERVED; i < KEY_F24; i++)
+        { __IOCTL(UI_SET_KEYBIT, i); }
+
+        input_setup.id.bustype = BUS_USB;
+        input_setup.id.vendor = 0x1232;
+        input_setup.id.product = FAKETABLETD_VID;
+        strcpy(input_setup.name, FAKETABLETD_NAME " Keyboard");
+
+        __IOCTL(UI_DEV_SETUP, &input_setup);
+        __IOCTL(UI_DEV_CREATE);
+
+    } while (0);
+#undef __IOCTL
+
+    if(ret < 0)
+    {
+        close(keyboard_device);
+        __STD_CATCHER_CRITICAL(ret, "error creating virtual keyboard");
+    }
+    
+    return keyboard_device;
+}
+
 static void claim_interface_for_handle(struct libusb_device_handle *handle, struct interface_status_t *interface)
 {
     int ret = 0;
@@ -237,7 +277,10 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
             .pad_device = pad_device,
             .pen_device = pen_device,
 
-            .mouse_device = mouse_device
+            .mouse_device = mouse_device,
+            .keyboard_device = keyboard_device,
+
+            .config_available = get_should_use_config()
         };
         ret = process_raw_input(&raw_input_data);
         if(!(error_found = ret < 0))
@@ -284,6 +327,7 @@ static void cleannup(void)
 
     set_should_close(false);
 
+    CLOSE_UINPUT_DEVICE(keyboard_device);
     CLOSE_UINPUT_DEVICE(mouse_device);
     CLOSE_UINPUT_DEVICE(pen_device);
     CLOSE_UINPUT_DEVICE(pad_device);
@@ -371,6 +415,54 @@ static bool look_for_devices(const char **device_name)
     return false;
 }
 
+static const char *get_home_config_file()
+{
+    static char path[60] = {0};
+
+    snprintf(path, 60, "%s/." CONFIG_FILE_NAME, getpwuid(getuid())->pw_dir);
+    return path;
+}
+
+static void read_config()
+{
+    int i = 0;
+    char label[INI_STRING_SIZE] = {0};
+    const char *str = NULL;
+
+    // Make sure config file data is empty, and register the expected items
+    ini_clear_items();
+
+    // Register buttons
+    for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
+    {
+        snprintf(label, INI_STRING_SIZE, "pad_button_%d", i+1);
+        ini_register_item(i, INI_TYPE_STRING, label);
+    }
+
+    // Look for a directory where a config file might be, and parse it if you found it
+    str = get_home_config_file();
+    const char *config_paths[] = { str, ETC_CONFIG_PATH };
+    if((str = check_paths(config_paths, 2)) == NULL)
+        return;
+    
+    if(ini_parse_file(str) != 0)
+    {
+        __ERROR("cannot parse file \"%s\"", str);
+        set_should_use_config(false);
+        return;
+    }
+
+    for(i = INI_BUTTON_1_INDEX; i < INI_BUTTON_MAX; i++)
+    {
+        if(!ini_item_is_populated(i)) continue;
+
+        str = ini_get_item(i, const char*);
+        __CATCHER_CRITICAL(validate_key_presses(str), "invalid binding on a config file \"%s\"", str);
+    }
+    
+    set_should_use_config(true);
+}
+
 static inline void print_help()
 {
     printf(
@@ -379,6 +471,7 @@ static inline void print_help()
         
         "Options\n"
         "  -m\t\t\tEnables virtual mouse emulation\n"
+        "  -k\t\t\tEnables virtual keyboard emulation\n"
         "  -r\t\t\tResets the program back to the scanning phase on disconnect (experimental)\n\n"
 
         "Examples:\n"
@@ -391,7 +484,7 @@ int main(int argc, char const **argv)
 {
     // Local variables
     int ret = 0;
-    bool use_virtual_mouse = false;
+    bool use_virtual_mouse = false, use_virtual_keyboard = false;
     unsigned char descriptor_string[50] = {};
 
     // Initialize locals
@@ -421,16 +514,22 @@ int main(int argc, char const **argv)
     signal(SIGINT, sigint_handler);
     signal(SIGTERM, sigterm_handler);
 
+    // Read config from config file
+    read_config();
+
     // Make sure we clean our mess before we leave
     atexit(cleannup);
 
     // Get argument options
-    while((ret = getopt(argc, (char* const*)argv, "mrh")) != -1)
+    while((ret = getopt(argc, (char* const*)argv, "mrhk")) != -1)
     {
         switch (ret)
         {
         case 'm':
             use_virtual_mouse = true;
+            break;
+        case 'k':
+            use_virtual_keyboard = true;
             break;
         case 'r':
             set_should_reset(true);
@@ -501,6 +600,8 @@ int main(int argc, char const **argv)
     
         if(use_virtual_mouse)
             mouse_device = create_virtual_mouse();
+        if(use_virtual_keyboard)
+            keyboard_device = create_virtual_keyboard();
 
         // Allocate space for tranfer callback
         transfer_buffer = calloc(HID_BUFFER_SIZE, sizeof(uint8_t));

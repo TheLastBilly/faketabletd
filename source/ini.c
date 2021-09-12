@@ -25,6 +25,34 @@
 
 struct ini_item_t ini_items_[] = {};
 
+static bool string_is_number(const char *str)
+{
+    size_t size = strlen(str);
+    while(size-- > 0)
+    {
+        switch (str[size])
+        {
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+        case '.':
+        case ' ':
+            continue;
+        default:
+            return false;
+        }
+    }
+
+    return true;
+}
+
 void ini_clear_items()
 {
     memset(ini_items_, 0, INI_BUFFER_SIZE * sizeof(struct ini_item_t));
@@ -62,8 +90,10 @@ void *ini_get_item_(int index)
 {
     CHECK_IF_OUT_OF_BOUNDS(index, NULL);
     struct ini_item_t *item = &ini_items_[index];
-
-    item->_data = &item->_generic;
+    
+    if(item->_data == NULL)
+        return NULL;
+    
     switch (item->type)
     {
     case INI_TYPE_INT:
@@ -85,7 +115,7 @@ int ini_clear_item(int index)
     return 0;
 }
 
-static int parse_entry(const char *label, const char *value)
+static bool parse_entry(const char *label, const char *value)
 {
     struct ini_item_t *item = NULL;
 
@@ -97,8 +127,17 @@ static int parse_entry(const char *label, const char *value)
     }
 
     if(item == NULL)
-        return -1;
+    {
+        __ERROR("invalid label \"%s\"", label);
+        return false;
+    }
+    if(item->type != INI_TYPE_STRING && !string_is_number(value))
+    {
+        __ERROR("value \"%s\" of label \"%s\" is not a number", value, label);
+        return false;
+    }
 
+    item->_data = &item->_generic;
     switch (item->type)
     {
     case INI_TYPE_INT:
@@ -111,11 +150,11 @@ static int parse_entry(const char *label, const char *value)
         APPLY_TO_STATIC_STRING(item->string, value);
         break;
     default:
-        return -1;
-        break;
+        __ERROR("unidentified type on label \"%s\"", label);
+        return false;
     }
 
-    return 0;
+    return true;
 }
 
 int ini_parse_file(const char *file_path)
@@ -123,18 +162,18 @@ int ini_parse_file(const char *file_path)
     FILE *fp = NULL;
     char line[100] = {0};
     char *label = NULL, *value = NULL;
-    int start = 0, end = 0, line_number = 0;
+    int start = 0, end = 0, line_number = 0, ret = 0;
 
     if(file_path == NULL)
     {
         __ERROR("cannot register item with empty label");
-        return EINVAL;
+        return -1;
     }
 
     if((fp = fopen(file_path, "r")) == NULL)
     {
         __ERROR("cannot open \"%s\"", file_path);
-        return ENOENT;
+        return -1;
     }
 
 #define FIND_COMPONENT()                                                \
@@ -159,7 +198,7 @@ int ini_parse_file(const char *file_path)
                                                                         \
     if(end >= sizeof(line))                                             \
     {                                                                   \
-        __WARNING("invalid entry %s:%d",file_path, line_number);        \
+        __WARNING("invalid entry on %s:%d",file_path, line_number);     \
         continue;                                                       \
     }
     while(fgets(line, sizeof(line), fp))
@@ -172,14 +211,25 @@ int ini_parse_file(const char *file_path)
         // Get value
         FIND_COMPONENT();
         value = &line[start];
+
+        if(!parse_entry(label, value))
+        {
+            ret = -1;
+            break;
+        }
         start = end = 0;
-
-        parse_entry(label, value);
-
+        label = value = NULL;
+        
         line_number++;
     }
 #undef FIND_COMPONENT
 
     fclose(fp);
-    return 0;
+    return ret;
+}
+
+bool ini_item_is_populated(int index)
+{
+    CHECK_IF_OUT_OF_BOUNDS(index, false);
+    return ini_items_[index]._data != NULL;
 }
