@@ -85,6 +85,13 @@ static const struct input_id faketabletd_id = (const struct input_id)
     .product    = FAKETABLETD_PID,
     .version    = FAKETABLETD_VERSION,
 };
+static const struct input_id wacom_id = (const struct input_id)
+{
+    .bustype    = BUS_USB,
+    .vendor     = 0x056a,
+    .product    = 0x0314,
+    .version    = 0x0110,
+};
 
 // Signal handlers
 static void sigint_handler(int sig)
@@ -355,16 +362,16 @@ static void cleannup(void)
         interface_1.claimed = false;
     }
 
-    if(interface_1.detached_from_kernel)
-    {
-        libusb_attach_kernel_driver(device_handle, interface_1.number);
-        interface_1.detached_from_kernel = false;
-    }
-    if(interface_0.detached_from_kernel)
-    {
-        libusb_attach_kernel_driver(device_handle, interface_0.number);
-        interface_0.detached_from_kernel = false;
-    }
+    // if(interface_1.detached_from_kernel)
+    // {
+    //     libusb_attach_kernel_driver(device_handle, interface_1.number);
+    //     interface_1.detached_from_kernel = false;
+    // }
+    // if(interface_0.detached_from_kernel)
+    // {
+    //     libusb_attach_kernel_driver(device_handle, interface_0.number);
+    //     interface_0.detached_from_kernel = false;
+    // }
 
     if(device_handle != NULL)
     {
@@ -470,6 +477,7 @@ static inline void print_help()
         "User space driver for drawing tablets\n\n"
         
         "Options\n"
+        "  -w\t\t\tEnables wacom tablet simulation support\n"
         "  -m\t\t\tEnables virtual mouse emulation\n"
         "  -k\t\t\tEnables virtual keyboard emulation\n"
         "  -r\t\t\tResets the program back to the scanning phase on disconnect (experimental)\n\n"
@@ -484,8 +492,12 @@ int main(int argc, char const **argv)
 {
     // Local variables
     int ret = 0;
-    bool use_virtual_mouse = false, use_virtual_keyboard = false;
+    bool 
+        use_virtual_mouse = false, 
+        use_virtual_keyboard = false,
+        use_wacom = false;
     unsigned char descriptor_string[50] = {};
+    struct input_id *input_id;
 
     // Initialize locals
     usb_context         = NULL;
@@ -521,10 +533,13 @@ int main(int argc, char const **argv)
     atexit(cleannup);
 
     // Get argument options
-    while((ret = getopt(argc, (char* const*)argv, "mrhk")) != -1)
+    while((ret = getopt(argc, (char* const*)argv, "mrhkw")) != -1)
     {
         switch (ret)
         {
+        case 'w':
+            use_wacom = true;
+            break;
         case 'm':
             use_virtual_mouse = true;
             break;
@@ -595,8 +610,13 @@ int main(int argc, char const **argv)
         );
 
         // Create virtual pen and pad
-        pad_device = create_virtual_pad((struct input_id *)&faketabletd_id, FAKETABLETD_NAME " Pad");
-        pen_device = create_virtual_pen((struct input_id *)&faketabletd_id, FAKETABLETD_NAME " Pen");
+        if(use_wacom)
+            input_id = (struct input_id *)&wacom_id;
+        else
+            input_id = (struct input_id *)&faketabletd_id;
+        
+        pad_device = create_virtual_pad(input_id, FAKETABLETD_NAME " Pad");
+        pen_device = create_virtual_pen(input_id, FAKETABLETD_NAME " Pen");
     
         if(use_virtual_mouse)
             mouse_device = create_virtual_mouse();
