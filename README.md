@@ -28,6 +28,7 @@ Use the following commands to build **faketabletd**
 ```bash
 cd faketabletd
 mkdir build
+cd build
 cmake ..
 make
 ```
