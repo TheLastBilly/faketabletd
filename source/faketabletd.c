@@ -94,14 +94,15 @@ static const struct input_id wacom_id = (const struct input_id)
 };
 
 // Signal handlers
-static void sigint_handler(int sig)
+static void signal_handler(int sig)
 {
-    __INFO("SIGINT detected, terminating...");
+    __INFO("termination signal detected!");
+    
+    if(device_transfer != NULL)
+        libusb_cancel_transfer(device_transfer);
+
     set_should_close(true);
-}
-static void sigterm_handler(int sig)
-{
-    set_should_close(true);
+    set_should_reset(false);
 }
 
 // Device name for the specified vendor and product id. Return NULL if
@@ -269,9 +270,8 @@ static void claim_interface_for_handle(struct libusb_device_handle *handle, stru
 static void interrupt_transfer_callback(struct libusb_transfer *transfer)
 {
     int ret = 0;
-    bool error_found = true;
+    bool terminate = true;
     struct raw_input_data_t raw_input_data;
-    
     if(transfer == NULL || get_should_close()) return;
     
     switch (transfer->status)
@@ -290,11 +290,10 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
             .config_available = get_should_use_config()
         };
         ret = process_raw_input(&raw_input_data);
-        if(!(error_found = ret < 0))
+        if(!(terminate = ret < 0))
         {
-            libusb_submit_transfer(transfer);
-            __USB_CATCHER(ret, "cannot resubmit event transfer");
-            error_found = ret < 0;
+            __USB_CATCHER(ret = libusb_submit_transfer(transfer), "cannot resubmit event transfer");
+            terminate = ret < 0;
         }
         break;
     
@@ -323,7 +322,7 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
         break;
     }
 
-    if(error_found)
+    if(terminate)
         set_should_close(true);
 }
 
@@ -377,6 +376,7 @@ static void cleannup(void)
     {
         libusb_close(device_handle);
         device_handle = NULL;
+        device = NULL;
     }
 
     if(device_list != NULL)
@@ -399,6 +399,7 @@ static void cleannup(void)
 static bool look_for_devices(const char **device_name)
 {
     size_t i = 0;
+    struct libusb_device* dev = NULL;
     devices_detected = 0;
 
     if(device_list != NULL) libusb_free_device_list(device_list, true);
@@ -412,11 +413,15 @@ static bool look_for_devices(const char **device_name)
     // Find compatible devices
     for(i = 0; i < devices_detected; i++)
     {
-        device = device_list[i];
+        dev = device_list[i];
 
         // See if current device on the list is supported
-        __USB_CATCHER(libusb_get_device_descriptor(device, &descriptor), "cannot get device descriptor");
-        if((*device_name = setup_device(descriptor.idVendor, descriptor.idProduct)) != NULL) return true;
+        __USB_CATCHER(libusb_get_device_descriptor(dev, &descriptor), "cannot get device descriptor");
+        if((*device_name = setup_device(descriptor.idVendor, descriptor.idProduct)) != NULL)
+        {
+            device = dev;
+            return true;
+        }
     }
     
     return false;
@@ -521,8 +526,8 @@ int main(int argc, char const **argv)
     const char* device_name = NULL;
 
     // Make sure we catch Ctrl-C when asked to terminate
-    signal(SIGINT, sigint_handler);
-    signal(SIGTERM, sigterm_handler);
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
 
     // Make sure we clean our mess before we leave
     atexit(cleannup);
