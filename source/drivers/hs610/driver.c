@@ -86,10 +86,11 @@ const char *hs610_get_device_name()
 int hs610_process_raw_input(const struct raw_input_data_t *data)
 {
     int ret = 0;
+    bool pen_present = false;
     size_t i = 0, x = 0;
     uint8_t report_type = 0;
-    int32_t x_pos, y_pos;
-    static int32_t x_opos, y_opos,  pres;
+    int32_t x_pos = 0, y_pos = 0;
+    static int32_t x_opos = 0, y_opos = 0, pres = 0;
     struct input_event ev = (struct input_event){};
 
     static int32_t scroll_wheel_buffer = 0;
@@ -104,30 +105,30 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
     // If you received a pen report...
     if(CHECK_MASK(report_type, REPORT_PEN_MASK))
     {
-        // If it's in range, send its coordinates and status to the virtual pen
-        if(report_type & REPORT_PEN_IN_RANGE_MASK)
+        pen_present = report_type & REPORT_PEN_IN_RANGE_MASK;
+        x_pos = FORM_24BIT(data->data[8], data->data[3], data->data[2]);
+        y_pos = FORM_24BIT(data->data[9], data->data[5], data->data[4]);
+        pres = FORM_24BIT(0, data->data[7], data->data[6]);
+
+        // https://01.org/linuxgraphics/gfx-docs/drm/input/uinput.html
+        if(data->use_virtual_cursor && data->mouse_device > 0 && pen_present)
         {
-            x_pos = FORM_24BIT(data->data[8], data->data[3], data->data[2]);
-            y_pos = FORM_24BIT(data->data[9], data->data[5], data->data[4]);
-            pres = FORM_24BIT(0, data->data[7], data->data[6]);
+            SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_X, (int)(data->cursor_speed*((float)(x_pos - x_opos)/MAX_POS)));
+            SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_Y, (int)(data->cursor_speed*((float)(y_pos - y_opos)/MAX_POS)));
+            SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
 
-            // https://01.org/linuxgraphics/gfx-docs/drm/input/uinput.html
-            if(data->use_virtual_cursor && data->mouse_device > 0)
-            {
-                SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_X, (int)(data->cursor_speed*((float)(x_pos - x_opos)/MAX_POS)));
-                SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_Y, (int)(data->cursor_speed*((float)(y_pos - y_opos)/MAX_POS)));
-                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
+            SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_LEFT, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
+            SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_RIGHT, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
+            SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_MIDDLE, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
+            SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
 
-                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_LEFT, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
-                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_RIGHT, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
-                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_MIDDLE, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
-                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
-
-
-                x_opos = x_pos;
-                y_opos = y_pos;
-            }
-            else
+            x_opos = x_pos;
+            y_opos = y_pos;
+        }
+        else
+        {
+            // If it's in range, send its coordinates and status to the virtual pen
+            if(pen_present)
             {
                 // Send X and Y coordinates value
                 SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_X, x_pos);
@@ -149,15 +150,15 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
                 // Update the driver
                 SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
             }
-        }
-        // Otherwise, let the virtual pen know we are not touching the frame
-        else
-            SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOOL_PEN, 0);
+            // Otherwise, let the virtual pen know we are not touching the frame
+            else
+                SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOOL_PEN, 0);
 
-        // A serial number is required when sending button press
-        // events from a pen device. Or somthing like that...
-        SEND_INPUT_EVENT(data->pen_device, EV_MSC, MSC_SERIAL, 1098942556);
-        SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
+            // A serial number is required when sending button press
+            // events from a pen device. Or somthing like that...
+            SEND_INPUT_EVENT(data->pen_device, EV_MSC, MSC_SERIAL, 1098942556);
+            SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
+        }
     }
     else
     {
