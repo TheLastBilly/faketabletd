@@ -45,9 +45,15 @@ static struct libusb_device  **device_list, *device;
 static struct libusb_device_handle *device_handle;
 static struct libusb_device_descriptor descriptor;
 static struct libusb_transfer *device_transfer;
-static uint8_t *transfer_buffer;
+
 static volatile int pen_device, pad_device, mouse_device, keyboard_device;
+
 static size_t devices_detected;
+static uint8_t *transfer_buffer;
+
+static int cursor_speed;
+static bool use_virtual_cursor;
+static bool use_virtual_wheel;
 
 // Device setup callbacks
 create_virtual_device_callback_t create_virtual_pad_callback;
@@ -287,6 +293,11 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
             .mouse_device = mouse_device,
             .keyboard_device = keyboard_device,
 
+            .cursor_speed = cursor_speed,
+
+            .use_virtual_cursor = use_virtual_cursor,
+            .use_virtual_wheel = use_virtual_wheel,
+
             .config_available = get_should_use_config()
         };
         ret = process_raw_input(&raw_input_data);
@@ -451,6 +462,9 @@ static void read_config()
         ini_register_item(i, INI_TYPE_STRING, label);
     }
 
+    snprintf(label, INI_STRING_SIZE, "cursor_speed");
+    ini_register_item(INI_CURSOR_SPEED, INI_TYPE_INT, label);
+
     // Look for a directory where a config file might be, and parse it if you found it
     str = get_home_config_file();
     const char *config_paths[] = { str, ETC_CONFIG_PATH };
@@ -469,6 +483,9 @@ static void read_config()
         str = ini_get_item(i, const char*);
         __CATCHER_CRITICAL(validate_key_presses(str), "invalid binding on a config file \"%s\"", str);
     }
+
+    if(ini_item_is_populated(INI_CURSOR_SPEED))
+        cursor_speed = ini_get_item(INI_CURSOR_SPEED, int);
     
     set_should_use_config(true);
 }
@@ -481,7 +498,8 @@ static inline void print_help()
         
         "Options\n"
         "  -w\t\t\tEnables wacom tablet simulation support\n"
-        "  -m\t\t\tEnables virtual mouse emulation\n"
+        "  -c\t\t\tEnables virtual mouse cursor emulation\n"
+        "  -s\t\t\tEnables virtual mouse scrolling wheel emulation\n"
         "  -k\t\t\tEnables virtual keyboard emulation\n"
         "  -r\t\t\tResets the program back to the scanning phase on disconnect (experimental)\n\n"
 
@@ -518,6 +536,8 @@ int main(int argc, char const **argv)
     pad_device          = -1;
     mouse_device        = -1;
 
+    cursor_speed        = DEFAULT_CURSOR_SPEED;
+
     descriptor = (struct libusb_device_descriptor){};
 
     should_close = false;
@@ -532,19 +552,19 @@ int main(int argc, char const **argv)
     // Make sure we clean our mess before we leave
     atexit(cleannup);
 
-    // Read config from config file
-    read_config();
-
     // Get argument options
-    while((ret = getopt(argc, (char* const*)argv, "mrhkw")) != -1)
+    while((ret = getopt(argc, (char* const*)argv, "scrhkw")) != -1)
     {
         switch (ret)
         {
         case 'w':
             use_wacom = true;
             break;
-        case 'm':
-            use_virtual_mouse = true;
+        case 's':
+            use_virtual_wheel = true;
+            break;
+        case 'c':
+            use_virtual_cursor = true;
             break;
         case 'k':
             use_virtual_keyboard = true;
@@ -563,6 +583,10 @@ int main(int argc, char const **argv)
             break;
         }
     }
+    use_virtual_mouse = use_virtual_cursor || use_virtual_wheel;
+
+    // Read config from config file
+    read_config();
 
     while(1)
     {

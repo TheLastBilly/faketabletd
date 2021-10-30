@@ -17,11 +17,13 @@
     __ERROR("unspecified type");                                                \
     return -1;                                                                  \
 }
-#define APPLY_TO_STATIC_STRING(ssrc_, dsrc_)                                    \
+#define APPLY_TO_STATIC_STRING(dsrc_, ssrc_)                                    \
 {                                                                               \
-    uint s_ = MIN(GET_LEN(ssrc_), strlen(dsrc_));                               \
-    memcpy(ssrc_, dsrc_, s_);                                                   \
+    uint s_ = MIN(GET_LEN(dsrc_), strlen(ssrc_));                               \
+    memset(dsrc_, 0, sizeof(dsrc_));                                            \
+    memcpy(dsrc_, ssrc_, s_);                                                   \
 }
+
 
 struct ini_item_t ini_items_[] = {};
 
@@ -82,7 +84,6 @@ int ini_register_item(int index, int type, const char *label)
     default:
         BAD_TYPE_ERROR();
     }
-
     APPLY_TO_STATIC_STRING(item->label, label);
     return 0;
 }

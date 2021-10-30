@@ -24,6 +24,8 @@
 #define FORM_24BIT(a, b, c)         ((int32_t)(a) << 16 | (int32_t)(b) << 8 | (int32_t)(c))
 #define FORM_16BIT(a, b)            ((uint16_t)(a) << 8 | (uint16_t)(b))
 
+#define MAX_POS                     51000
+
 // tl;dr, the scroll wheel goes from 0x00 to 0x0d (12 positions) and
 // the wacom driver can only take values from 0 to 71. The comparison
 // at the start is just to orientate the wheel from left to right
@@ -86,6 +88,8 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
     int ret = 0;
     size_t i = 0, x = 0;
     uint8_t report_type = 0;
+    int32_t x_pos, y_pos;
+    static int32_t x_opos, y_opos,  pres;
     struct input_event ev = (struct input_event){};
 
     static int32_t scroll_wheel_buffer = 0;
@@ -103,31 +107,48 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
         // If it's in range, send its coordinates and status to the virtual pen
         if(report_type & REPORT_PEN_IN_RANGE_MASK)
         {
-            // Send X and Y coordinates value
-            SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_X, FORM_24BIT(data->data[8], data->data[3], data->data[2]));
-            SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_Y, FORM_24BIT(data->data[9], data->data[5], data->data[4]));
+            x_pos = FORM_24BIT(data->data[8], data->data[3], data->data[2]);
+            y_pos = FORM_24BIT(data->data[9], data->data[5], data->data[4]);
+            pres = FORM_24BIT(0, data->data[7], data->data[6]);
 
-            // Send pressure readings
-            SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_PRESSURE, FORM_24BIT(0, data->data[7], data->data[6]));
+            // https://01.org/linuxgraphics/gfx-docs/drm/input/uinput.html
+            if(data->use_virtual_cursor && data->mouse_device > 0)
+            {
+                SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_X, (int)(data->cursor_speed*((float)(x_pos - x_opos)/MAX_POS)));
+                SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_Y, (int)(data->cursor_speed*((float)(y_pos - y_opos)/MAX_POS)));
+                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
 
-            // Send tilt readinds
-            SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, (int8_t)data->data[10]);
-            SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, -(int8_t)data->data[11]);    // Y axis needs to be inverted so it point would
-                                                                                    // point to the opposite direction
-            
-            // Let the virtual pen know the real pen is present
-            SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOOL_PEN, 1);
+                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_LEFT, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
+                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_RIGHT, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
+                SEND_INPUT_EVENT(data->mouse_device, EV_KEY, BTN_MIDDLE, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
+                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
 
-            // Update the driver
-            SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
 
-            // Send button data
-            SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOUCH, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
-            SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
-            SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS2, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
+                x_opos = x_pos;
+                y_opos = y_pos;
+            }
+            else
+            {
+                // Send X and Y coordinates value
+                SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_X, x_pos);
+                SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_Y, y_pos);
 
-            // Update the driver
-            SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
+                // Send pressure readings
+                SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_PRESSURE, pres);
+
+                // Send tilt readinds
+                SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, (int8_t)data->data[10]);
+                SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, -(int8_t)data->data[11]);    // Y axis needs to be inverted so it point would
+                                                                                        // point to the opposite direction
+
+                // Send button data
+                SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOUCH, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
+                SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS, ((report_type & REPORT_PEN_BTN_STYLUS) != 0));
+                SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_STYLUS2, ((report_type & REPORT_PEN_BTN_STYLUS2) != 0));
+
+                // Update the driver
+                SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
+            }
         }
         // Otherwise, let the virtual pen know we are not touching the frame
         else
@@ -205,7 +226,7 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
         {
             // The scrolling wheel goes from 0x00 to 0x00d
             int32_t dial_value = data->data[5];
-            if(data->mouse_device < 0)
+            if(data->use_virtual_wheel && data->mouse_device < 0)
             {    
                 if(dial_value != 0)
                     dial_value = CONVERT_RAW_DIAL(dial_value);
@@ -213,7 +234,7 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
                 // https://github.com/DIGImend/digimend-kernel-drivers/issues/275#issuecomment-667822380
                 SEND_INPUT_EVENT(data->pad_device, EV_ABS, ABS_MISC, dial_value > 0 ? 15 : 0);
                 SEND_INPUT_EVENT(data->pad_device, EV_ABS, ABS_WHEEL, dial_value);
-                SEND_INPUT_EVENT(data->pad_device, EV_SYN, SYN_REPORT, 1);
+                SEND_INPUT_EVENT(data->pad_device, EV_SYN, SYN_REPORT, 0);
             }
             else if (dial_value != 0)
             {

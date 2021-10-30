@@ -35,6 +35,8 @@
 #define HID_BUFFER_SIZE             0x40
 #define HID_ENDPOINT                0x81
 
+#define DEFAULT_CURSOR_SPEED        5000
+
 #ifndef FAKETABLETD_UINPUT_PATH
 #define FAKETABLETD_UINPUT_PATH     "/dev/uinput"
 #endif
@@ -60,7 +62,9 @@
 #define INI_BUTTON_14_INDEX         13
 #define INI_BUTTON_15_INDEX         14
 #define INI_BUTTON_16_INDEX         15
-#define INI_BUTTON_MAX     (INI_BUTTON_16_INDEX + 1)
+
+#define INI_CURSOR_SPEED            16
+#define INI_BUTTON_MAX     (INI_CURSOR_SPEED + 1)
 
 // Object that we pass to the drivers
 struct raw_input_data_t
@@ -73,6 +77,10 @@ struct raw_input_data_t
 
     int mouse_device;
     int keyboard_device;
+
+    int cursor_speed;
+    bool use_virtual_cursor;
+    bool use_virtual_wheel;
 
     bool config_available;
 };
