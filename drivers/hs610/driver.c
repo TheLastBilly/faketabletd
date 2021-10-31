@@ -8,9 +8,7 @@
 // More info: https://digimend.github.io/support/howto/trbl/diagnostics/
 #define REPORT_SIZE                 12
 
-#define REPORT_LEADING_BYTE         0x08
-
-#define REPORT_PEN_MASK             0x70
+#define REPORT_PEN_MASK             0x08
 #define REPORT_PEN_IN_RANGE_MASK    0x80
 #define REPORT_PEN_TOUCH_MASK       0x01
 #define REPORT_PEN_BTN_STYLUS       0x02
@@ -33,29 +31,25 @@
 
 #ifdef VALIDATE
 #undef VALIDATE
-#define VALIDATE(_expr, _fmt, _args...)                 \
-{                                                       \
-    if(!(_expr))                                        \
-    {                                                   \
-        __ERROR(_fmt, ##_args);                         \
-        return -1;                                      \
-    }                                                   \
+#define VALIDATE(_expr, _fmt, _args...)                             \
+{                                                                   \
+    if(!(_expr))                                                    \
+    {                                                               \
+        __ERROR(_fmt, ##_args);                                     \
+        return -1;                                                  \
+    }                                                               \
 }
 #endif
 
 // Send event to device using fd
-#define SEND_INPUT_EVENT(_fd, _type, _code, _value)     \
-{                                                       \
-    ev.type = _type;                                    \
-    ev.code = _code;                                    \
-    ev.value = _value;                                  \
-    ev.time.tv_sec = 0;                                 \
-    ev.time.tv_usec = 0;                                \
-    __STD_CATCHER(                                      \
-        ret = write(_fd, &ev, sizeof(ev)),              \
-        "cannot send event data"                        \
-    );                                                  \
-    if(ret < 0) return -1;                              \
+#define SEND_INPUT_EVENT(_dev, _type, _code, _value)                \
+{                                                                   \
+    ret = libevdev_uinput_write_event(_dev, _type, _code, _value);  \
+    if(ret < 0)                                                     \
+    {                                                               \
+        __EVDEV_CATCHER(ret, "canno send input event");             \
+        return -1;                                                  \
+    }                                                               \
 }
 
 static const uint32_t btn_codes[] = 
@@ -88,10 +82,9 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
     int ret = 0;
     bool pen_present = false;
     size_t i = 0, x = 0;
-    uint8_t report_type = 0;
+    uint8_t status = 0, report_type = 0;
     int32_t x_pos = 0, y_pos = 0;
     static int32_t x_opos = 0, y_opos = 0, pres = 0;
-    struct input_event ev = (struct input_event){};
 
     static int32_t scroll_wheel_buffer = 0;
 
@@ -99,19 +92,23 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
     VALIDATE(data->pad_device >= 0, "invalid virtual pad device");
     VALIDATE(data->pen_device >= 0, "invalid virtual pen device");
 
-    if(data->size < REPORT_SIZE || data->data[0] != REPORT_LEADING_BYTE) return 0;
+    if(data->size < REPORT_SIZE) return 0;
+    status = data->data[0];
     report_type = data->data[1];
 
     // If you received a pen report...
-    if(CHECK_MASK(report_type, REPORT_PEN_MASK))
+    if(CHECK_MASK(status, REPORT_PEN_MASK))
     {
+#ifndef NDEBUG
+        __INFO("recevied pen report (%02X)", status);
+#endif
         pen_present = report_type & REPORT_PEN_IN_RANGE_MASK;
-        x_pos = FORM_24BIT(data->data[8], data->data[3], data->data[2]);
-        y_pos = FORM_24BIT(data->data[9], data->data[5], data->data[4]);
-        pres = FORM_24BIT(0, data->data[7], data->data[6]);
+        x_pos = FORM_24BIT(0, data->data[3], data->data[2]);
+        y_pos = FORM_24BIT(0, data->data[6], data->data[5]);
+        pres = FORM_24BIT(0, data->data[9], data->data[8]);
 
         // https://01.org/linuxgraphics/gfx-docs/drm/input/uinput.html
-        if(data->use_virtual_cursor && data->mouse_device > 0 && pen_present)
+        if(data->use_virtual_cursor && data->mouse_device != NULL && pen_present)
         {
             SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_X, (int)(data->cursor_speed*((float)(x_pos - x_opos)/MAX_POS)));
             SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_Y, (int)(data->cursor_speed*((float)(y_pos - y_opos)/MAX_POS)));
@@ -127,7 +124,7 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
         }
         else
         {
-            // If it's in range, send its coordinates and status to the virtual pen
+            // If it's in range, send its coordinates and report_type to the virtual pen
             if(pen_present)
             {
                 // Send X and Y coordinates value
@@ -140,7 +137,8 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
                 // Send tilt readinds
                 SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, (int8_t)data->data[10]);
                 SEND_INPUT_EVENT(data->pen_device, EV_ABS, ABS_TILT_X, -(int8_t)data->data[11]);    // Y axis needs to be inverted so it point would
-                                                                                        // point to the opposite direction
+                                                                                                    // point to the opposite direction
+                SEND_INPUT_EVENT(data->pen_device, EV_SYN, SYN_REPORT, 1);
 
                 // Send button data
                 SEND_INPUT_EVENT(data->pen_device, EV_KEY, BTN_TOUCH, ((report_type & REPORT_PEN_TOUCH_MASK) != 0));
@@ -166,6 +164,9 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
         {
         case REPORT_FRAME_ID:
         {
+#ifndef NDEBUG
+            __INFO("recevied frame report (%02X)", report_type);
+#endif
             // Each bit in btn_pressed represents the state of a
             // button, thus why we use 16 buttons in this case
             uint16_t btns_pressed = FORM_16BIT(data->data[5], data->data[4]);
@@ -178,7 +179,7 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
             for(i = 0; i < (sizeof(btns_pressed) *8); btns_pressed >>=1, i++)
                 SEND_INPUT_EVENT(data->pad_device, EV_KEY, btn_codes[i], btns_pressed & 0x01);
             
-            if(data->config_available && data->keyboard_device >= 0)
+            if(data->config_available && data->keyboard_device != NULL)
             {
                 btns_pressed = FORM_16BIT(data->data[5], data->data[4]);
 
@@ -215,7 +216,11 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
 
                     if(ini_item_is_populated(x) && (ret = simulate_key_presses(data->keyboard_device, 
                         ini_get_item(x, const char *)
-                    )) < 0) return ret;
+                    )) < 0) 
+                    {
+                        __EVDEV_CATCHER(ret,  "cannot simulate key press");
+                        return ret;
+                    }
                 }
             }
             
@@ -225,9 +230,12 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
         }
         case REPORT_DIAL_ID:
         {
+#ifndef NDEBUG
+        __INFO("recevied dial report (%02X)", status);
+#endif
             // The scrolling wheel goes from 0x00 to 0x00d
             int32_t dial_value = data->data[5];
-            if(data->use_virtual_wheel && data->mouse_device < 0)
+            if(!data->use_virtual_wheel)
             {    
                 if(dial_value != 0)
                     dial_value = CONVERT_RAW_DIAL(dial_value);
@@ -235,16 +243,15 @@ int hs610_process_raw_input(const struct raw_input_data_t *data)
                 // https://github.com/DIGImend/digimend-kernel-drivers/issues/275#issuecomment-667822380
                 SEND_INPUT_EVENT(data->pad_device, EV_ABS, ABS_MISC, dial_value > 0 ? 15 : 0);
                 SEND_INPUT_EVENT(data->pad_device, EV_ABS, ABS_WHEEL, dial_value);
-                SEND_INPUT_EVENT(data->pad_device, EV_SYN, SYN_REPORT, 0);
+                SEND_INPUT_EVENT(data->pad_device, EV_SYN, SYN_REPORT, 1);
             }
-            else if (dial_value != 0)
+            else if (dial_value != 0 && data->mouse_device != NULL)
             {
                 int step = WHEEL_STEP;
-                if(dial_value < scroll_wheel_buffer || (scroll_wheel_buffer == 1 && dial_value == 0x0d))
+                if(dial_value < scroll_wheel_buffer || (scroll_wheel_buffer == 0x01 && dial_value == 0x0d) || (scroll_wheel_buffer == 0x0d && dial_value == 0x01))
                     step = -step;
-                
                 SEND_INPUT_EVENT(data->mouse_device, EV_REL, REL_WHEEL, step);
-                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 0);
+                SEND_INPUT_EVENT(data->mouse_device, EV_SYN, SYN_REPORT, 1);
                 scroll_wheel_buffer = dial_value;
             }
             break;

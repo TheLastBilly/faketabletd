@@ -1,13 +1,9 @@
 #include "drivers/generic/generic.h"
 
-#define SET_ABS_PROPERTY(_code, _value, _min, _max, _res)   \
-    abs_setup = (struct uinput_abs_setup){};                \
-    abs_setup.code = _code;                                 \
-    abs_setup.absinfo.value = _value;                       \
-    abs_setup.absinfo.minimum = _min;                       \
-    abs_setup.absinfo.maximum = _max;                       \
-    abs_setup.absinfo.resolution = _res;                    \
-    ret = ioctl(fd, UI_ABS_SETUP, &abs_setup);              \
+#define SET_ABS_PROPERTY(_code, _min, _max, _res)       \
+    libevdev_set_abs_minimum(device, _code, _min);      \
+    libevdev_set_abs_maximum(device, _code, _max);      \
+    libevdev_set_abs_resolution(device, _code, _res);
 
 static const uint8_t evt_codes[] =
 {
@@ -37,82 +33,61 @@ static const uint32_t btn_codes[] =
     BTN_STYLUS2
 };
 
-static const uint8_t abs_codes[] =
+struct libevdev_uinput *generic_create_virtual_pen(struct input_id *id, const char *name)
 {
-    ABS_X,
-    ABS_Y,
-    ABS_Z,
-    ABS_RZ,
-    ABS_THROTTLE,
-    ABS_WHEEL,
-    ABS_PRESSURE,
-    ABS_DISTANCE,
-    ABS_TILT_X,
-    ABS_TILT_Y,
-    ABS_MISC
-};
-
-int generic_create_virtual_pen(struct input_id *id, const char *name)
-{
-    int fd = -1, ret = 0;
-    size_t size = 0, i = 0;
-    struct uinput_setup uinput_setup;
-    struct uinput_abs_setup abs_setup;
+    int ret = 0;
+    size_t i = 0;
+    struct libevdev *device = NULL;
+    struct libevdev_uinput *udev = NULL;
 
     VALIDATE(id != NULL, "cannot use invalid id for pen");
     do
     {
-        fd = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS);
-        if(fd < 0) { ret = fd; break; }
+        device = libevdev_new();
 
         // Enable events
-        size = GET_LEN(evt_codes);
-        for(i = 0; i < size && ret >= 0; i++)
-            ret = ioctl(fd, UI_SET_EVBIT, evt_codes[i]);
+        for(i = 0; i < GET_LEN(evt_codes) && ret >= 0; i++)
+            ret = libevdev_enable_event_type(device, evt_codes[i]);
         if(ret < 0) break;
-        
-        // Enable buttons
-        size = GET_LEN(btn_codes);
-        for(i = 0; i < size && ret >= 0; i++)
-            ret = ioctl(fd, UI_SET_KEYBIT, btn_codes[i]);
-        if(ret < 0) break;
-        
-        // Enable absolute values
-        size = GET_LEN(abs_codes);
-        for(i = 0; i < size && ret >= 0; i++)
-            ret = ioctl(fd, UI_SET_ABSBIT, abs_codes[i]);
+
+        if((ret = libevdev_enable_event_code(device, EV_SYN, SYN_REPORT, NULL)) < 0) break;
+
+        for(i = 0; i < GET_LEN(btn_codes) && ret >= 0; i++)
+            ret = libevdev_enable_event_code(device, EV_KEY, btn_codes[i], NULL);
         if(ret < 0) break;
 
         // Enable remaining devices
-        ret = ioctl(fd, UI_SET_ABSBIT, REL_WHEEL);      if(ret < 0) break;
-        ret = ioctl(fd, UI_SET_MSCBIT, MSC_SERIAL);     if(ret < 0) break;
+        ret = libevdev_enable_event_code(device, EV_REL, REL_WHEEL, NULL);      if(ret < 0) break;
+        ret = libevdev_enable_event_code(device, EV_MSC, MSC_SERIAL, NULL);     if(ret < 0) break;
         
         // Setup absolute values
-        SET_ABS_PROPERTY(ABS_X, 0, 0, 50800, 200);      if(ret < 0) break;
-        SET_ABS_PROPERTY(ABS_Y, 0, 0, 31750, 200);      if(ret < 0) break;
-        SET_ABS_PROPERTY(ABS_PRESSURE, 0, 0, 8191, 0);  if(ret < 0) break;
-        SET_ABS_PROPERTY(ABS_TILT_X, 0, -60, 60, 0);    if(ret < 0) break;
-        SET_ABS_PROPERTY(ABS_TILT_Y, 0, -60, 60, 0);    if(ret < 0) break;
+        SET_ABS_PROPERTY(ABS_X, 0, 50800, 200);
+        SET_ABS_PROPERTY(ABS_Y, 0, 31750, 200);
+        SET_ABS_PROPERTY(ABS_PRESSURE, 0, 8191, 0);
+        SET_ABS_PROPERTY(ABS_TILT_X, -60, 60, 0);
+        SET_ABS_PROPERTY(ABS_TILT_Y, -60, 60, 0);
         
-        // Make sure the name is not too long for the setup
-        size  = strlen(name);
-        size = size > GET_LEN(uinput_setup.name) ? GET_LEN(uinput_setup.name) : size;
-
         // Assing id and name to virtual device
-        uinput_setup = (struct uinput_setup){};
-        memcpy(uinput_setup.name, name, size);
-        memcpy(&uinput_setup.id, id, sizeof(struct input_id));
-        ret = ioctl(fd, UI_DEV_SETUP, &uinput_setup);   if(ret < 0) break;
+        libevdev_set_name(device, name);
+        libevdev_set_id_product(device, id->product);
+        libevdev_set_id_vendor(device, id->vendor);
 
-        // Create the virtual device
-        ret = ioctl(fd, UI_DEV_CREATE);                 if(ret < 0) break;
+        ret = libevdev_uinput_create_from_device(device, LIBEVDEV_UINPUT_OPEN_MANAGED, &udev);
+        if(ret < 0) break;
 
-        return fd;
+        libevdev_free(device);
+        return udev;
     }while(0);
 
     if(ret < 0)
-        close(fd);
-    __STD_CATCHER_CRITICAL(ret, "cannot create pad device");
+    {
+        if(udev != NULL)
+            libevdev_uinput_destroy(udev);
+        
+        else if(device != NULL)
+            libevdev_free(device);
+    }
+    __EVDEV_CATCHER_CRITICAL(ret, "cannot create pad device");
     
-    return ret;
+    return udev;
 }

@@ -7,11 +7,13 @@
 
 #include <fcntl.h>
 #include <linux/uinput.h>
+#include "libevdev/libevdev.h"
+#include "libevdev/libevdev-uinput.h"
 
 #include "utilities.h"
 #include "faketabletd.h"
 
-int generic_create_virtual_pad(struct input_id *id, const char *name);
-int generic_create_virtual_pen(struct input_id *id, const char *name);
+struct libevdev_uinput *generic_create_virtual_pad(struct input_id *id, const char *name);
+struct libevdev_uinput *generic_create_virtual_pen(struct input_id *id, const char *name);
 
 #endif

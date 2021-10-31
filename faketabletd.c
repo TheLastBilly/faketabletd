@@ -10,6 +10,7 @@
 #include <getopt.h>
 
 #include <hidapi/hidapi.h>
+#include <libevdev-1.0/libevdev/libevdev.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -32,13 +33,12 @@
     return _cb(__VA_ARGS__);                                    \
 }
 
-#define CLOSE_UINPUT_DEVICE(fd)                                 \
+#define DESTROY_UINPUT_DEVICE(fd)                               \
 {                                                               \
-    if(fd >= 0)                                                 \
+    if(fd != NULL)                                              \
     {                                                           \
-        ioctl(fd, UI_DEV_DESTROY);                              \
-        close(fd);                                              \
-        fd = -1;                                                \
+        libevdev_uinput_destroy(fd);                            \
+        fd = NULL;                                              \
     }                                                           \
 }
 
@@ -46,7 +46,7 @@ static hid_device *handle;
 static struct hid_device_info *device_info, *current_device;
 static unsigned char hid_buffer[HID_BUFFER_SIZE];
 
-static volatile int pen_device, pad_device, mouse_device, keyboard_device;
+static struct libevdev_uinput *pen_device, *pad_device, *mouse_device, *keyboard_device;
 
 static size_t devices_detected;
 static uint8_t *transfer_buffer;
@@ -67,9 +67,9 @@ REGISTER_MUTEX_VARIABLE(bool, should_reset);
 REGISTER_MUTEX_VARIABLE(bool, should_use_config);
 
 // Callback handlers
-static inline int create_virtual_pad(struct input_id *id, const char *name)
+static inline struct libevdev_uinput *create_virtual_pad(struct input_id *id, const char *name)
 { USE_RETURNING_CALLBACK(create_virtual_pad_callback, id, name); }
-static inline int create_virtual_pen(struct input_id *id, const char *name)
+static inline struct libevdev_uinput *create_virtual_pen(struct input_id *id, const char *name)
 { USE_RETURNING_CALLBACK(create_virtual_pen_callback, id, name); }
 
 static inline int process_raw_input(const struct raw_input_data_t *data)
@@ -131,86 +131,98 @@ static const char *setup_device(uint16_t vendor_id, uint16_t product_id)
 }
 
 // We use this to simulate mouse scroll events for the scroll wheel
-static int create_virtual_mouse()
+static struct libevdev_uinput *create_virtual_mouse()
 {
     int ret = 0;
-    struct uinput_setup input_setup = (struct uinput_setup){};
+    struct libevdev *device = NULL;
+    struct libevdev_uinput *udev = NULL;
 
-    __STD_CATCHER_CRITICAL(
-        mouse_device = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS),
-        "cannot open virtual mouse file"
-    );
+    device = libevdev_new();
 
-#define __IOCTL( ...) ret = ioctl(mouse_device, __VA_ARGS__); if(ret < 0) break;
+#define set_event( ...) ret = libevdev_enable_event_code(device, __VA_ARGS__, NULL); if(ret < 0) break;
     do
     {
         // Setup mouse events, buttons, scroll wheel and movement
-        __IOCTL(UI_SET_EVBIT, EV_KEY);
-        __IOCTL(UI_SET_KEYBIT, BTN_LEFT);
-        __IOCTL(UI_SET_KEYBIT, BTN_RIGHT);
-        __IOCTL(UI_SET_KEYBIT, BTN_MIDDLE);
-        __IOCTL(UI_SET_EVBIT, EV_REL);
-        __IOCTL(UI_SET_RELBIT, REL_X);
-        __IOCTL(UI_SET_RELBIT, REL_Y);
-        __IOCTL(UI_SET_RELBIT, REL_WHEEL);
-        __IOCTL(UI_SET_RELBIT, REL_WHEEL_HI_RES);
+        ret = libevdev_enable_event_type(device, EV_KEY); if(ret < 0) break;
+        ret = libevdev_enable_event_type(device, EV_SYN); if(ret < 0) break;
 
-        input_setup.id.bustype = BUS_USB;
-        input_setup.id.vendor = 0x1233;
-        input_setup.id.product = FAKETABLETD_VID;
-        strcpy(input_setup.name, FAKETABLETD_NAME " Mouse");
+        set_event(EV_KEY, EV_KEY);
+        set_event(EV_KEY, BTN_LEFT);
+        set_event(EV_KEY, BTN_RIGHT);
+        set_event(EV_KEY, BTN_MIDDLE);
+        set_event(EV_KEY, EV_REL);
+        set_event(EV_KEY, REL_X);
+        set_event(EV_KEY, REL_Y);
+        set_event(EV_KEY, REL_WHEEL);
+        set_event(EV_KEY, REL_WHEEL_HI_RES);
 
-        __IOCTL(UI_DEV_SETUP, &input_setup);
-        __IOCTL(UI_DEV_CREATE);
+        set_event(EV_SYN,  SYN_REPORT);
+
+        libevdev_set_name(device, FAKETABLETD_NAME " Mouse");
+        libevdev_set_id_vendor(device, 0x1233);
+        libevdev_set_id_bustype(device, BUS_USB);
+        libevdev_set_id_product(device, FAKETABLETD_VID);
+
+        ret = libevdev_uinput_create_from_device(device, LIBEVDEV_UINPUT_OPEN_MANAGED, &udev);
 
     } while (0);
 #undef __IOCTL
     if(ret < 0)
     {
-        close(mouse_device);
-        __STD_CATCHER_CRITICAL(ret, "error creating virtual mouse");
+        if(udev != NULL)
+            libevdev_uinput_destroy(udev);
+        
+        else if(device != NULL)
+            libevdev_free(device);
+            
+        __EVDEV_CATCHER_CRITICAL(ret, "error creating virtual keyboard");
     }
     
-    return mouse_device;
+    libevdev_free(device);
+    return udev;
 }
 
 // We use this to simulate keyboard presses
-static int create_virtual_keyboard()
+static struct libevdev_uinput *create_virtual_keyboard()
 {
     int ret = 0;
-    struct uinput_setup input_setup = (struct uinput_setup){};
+    struct libevdev *device = NULL;
+    struct libevdev_uinput *udev = NULL;
 
-    __STD_CATCHER_CRITICAL(
-        keyboard_device = open(FAKETABLETD_UINPUT_PATH, FAKETABLETD_UINTPUT_OFLAGS),
-        "cannot open virtual keyboard file"
-    );
+    device = libevdev_new();
 
-#define __IOCTL( ...) ret = ioctl(keyboard_device, __VA_ARGS__); if(ret < 0) break;
+#define set_event( ...) ret = libevdev_enable_event_code(device, __VA_ARGS__, NULL); if(ret < 0) break;
     do
     {
         // Setup mouse events, buttons, scroll wheel and movement
-        __IOCTL(UI_SET_EVBIT, EV_KEY);
+        ret = libevdev_enable_event_type(device, EV_KEY); if(ret < 0) break;
+        ret = libevdev_enable_event_type(device, EV_SYN); if(ret < 0) break;
+        
         for(int i = KEY_RESERVED; i < KEY_F24; i++)
-        { __IOCTL(UI_SET_KEYBIT, i); }
+        { set_event(EV_KEY, i); }
 
-        input_setup.id.bustype = BUS_USB;
-        input_setup.id.vendor = 0x1232;
-        input_setup.id.product = FAKETABLETD_VID;
-        strcpy(input_setup.name, FAKETABLETD_NAME " Keyboard");
+        libevdev_set_name(device, FAKETABLETD_NAME " Keyboard");
+        libevdev_set_id_vendor(device, 0x1232);
+        libevdev_set_id_bustype(device, BUS_USB);
+        libevdev_set_id_product(device, FAKETABLETD_VID);
 
-        __IOCTL(UI_DEV_SETUP, &input_setup);
-        __IOCTL(UI_DEV_CREATE);
+        ret = libevdev_uinput_create_from_device(device, LIBEVDEV_UINPUT_OPEN_MANAGED, &udev);
 
     } while (0);
-#undef __IOCTL
+#undef set_event
 
     if(ret < 0)
     {
-        close(keyboard_device);
-        __STD_CATCHER_CRITICAL(ret, "error creating virtual keyboard");
+        if(udev != NULL)
+            libevdev_uinput_destroy(udev);
+        
+        else if(device != NULL)
+            libevdev_free(device);
+        __EVDEV_CATCHER_CRITICAL(ret, "error creating virtual keyboard");
     }
     
-    return keyboard_device;
+    libevdev_free(device);
+    return udev;
 }
 
 static void process_raw_report(const unsigned char *data)
@@ -247,7 +259,11 @@ static void process_raw_report(const unsigned char *data)
     };
 
     if(process_raw_input(&raw_input_data) < 0)
+    {
+        __ERROR("cannot process input data");
         set_should_close(true);
+        set_should_reset(false);
+    }
 }
 
 // Free allocated objects and deinitialize libusb
@@ -255,10 +271,10 @@ static void cleannup(void)
 {
     set_should_close(false);
 
-    CLOSE_UINPUT_DEVICE(keyboard_device);
-    CLOSE_UINPUT_DEVICE(mouse_device);
-    CLOSE_UINPUT_DEVICE(pen_device);
-    CLOSE_UINPUT_DEVICE(pad_device);
+    DESTROY_UINPUT_DEVICE(keyboard_device);
+    DESTROY_UINPUT_DEVICE(mouse_device);
+    DESTROY_UINPUT_DEVICE(pen_device);
+    DESTROY_UINPUT_DEVICE(pad_device);
 
     if(handle != NULL)
     {
@@ -401,9 +417,10 @@ int main(int argc, char const **argv)
     create_virtual_pen_callback = NULL;
     process_raw_input_callback = NULL;
 
-    pen_device          = -1;
-    pad_device          = -1;
-    mouse_device        = -1;
+    pen_device          = NULL;
+    pad_device          = NULL;
+    mouse_device        = NULL;
+    keyboard_device     = NULL;
 
     cursor_speed        = DEFAULT_CURSOR_SPEED;
 
@@ -455,7 +472,7 @@ int main(int argc, char const **argv)
     // Read config from config file
     read_config();
 
-    while(1)
+    while(get_should_reset())
     {
         // Make sure we are clear to go on every cycle
         cleannup();
@@ -516,9 +533,6 @@ int main(int argc, char const **argv)
             if(ret > 0)
                 process_raw_report(hid_buffer);
         }
-
-        if(!get_should_reset())
-            break;
     }
 
     __INFO("terminating...");

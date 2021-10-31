@@ -66,11 +66,11 @@ struct raw_input_data_t
     const uint8_t *data;
     size_t size;
 
-    int pad_device;
-    int pen_device;
+    struct libevdev_uinput *pad_device;
+    struct libevdev_uinput *pen_device;
 
-    int mouse_device;
-    int keyboard_device;
+    struct libevdev_uinput *mouse_device;
+    struct libevdev_uinput *keyboard_device;
 
     int cursor_speed;
     bool use_virtual_cursor;
@@ -79,10 +79,10 @@ struct raw_input_data_t
     bool config_available;
 };
 
-typedef int (*create_virtual_device_callback_t)(struct input_id *id, const char *name);
+typedef struct libevdev_uinput *(*create_virtual_device_callback_t)(struct input_id *id, const char *name);
 typedef int (*process_raw_input_callback_t)(const struct raw_input_data_t *raw_input_data);
 
 bool validate_key_presses(const char keys[INI_STRING_SIZE]);
-int simulate_key_presses(int fd, const char keys[INI_STRING_SIZE]);
+int simulate_key_presses(struct libevdev_uinput *fd, const char keys[INI_STRING_SIZE]);
 
 #endif

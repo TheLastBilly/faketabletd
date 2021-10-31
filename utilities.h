@@ -53,11 +53,11 @@
 #define __HIDAPI_CATCHER_CRITICAL(_dev, _expr, _fmt, _args...)              \
     __BASE_CATCHER_CRITICAL(_expr, _fmt ": ", (const char*)hid_error(_dev), ##_args)
 
-// libusb catchers
-#define __USB_CATCHER(_expr, _fmt, _args...)                                \
-    __BASE_CATCHER(_expr, _fmt ":", libusb_strerror(_ret), ##_args)
-#define __USB_CATCHER_CRITICAL(_expr, _fmt, _args...)                       \
-    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", libusb_strerror(_ret), ##_args)
+// libevdev catchers
+#define __EVDEV_CATCHER(_expr, _fmt, _args...)                              \
+    __BASE_CATCHER(_expr, _fmt ": ", strerror(-_ret), ##_args)
+#define __EVDEV_CATCHER_CRITICAL(_expr, _fmt, _args...)                     \
+    __BASE_CATCHER_CRITICAL(_expr, _fmt ": ", strerror(-_ret), ##_args)
 
 // stderr catches
 #define __STD_CATCHER(_expr, _fmt, _args...)                                \
@@ -102,7 +102,7 @@ extern int errno;
         return _v;                                                          \
     }
 
-#define CHECK_MASK(_value, _mask) (((_value) & (_mask)) == 0)
+#define CHECK_MASK(_value, _mask) (((_value) & (_mask)) == _mask)
 
 #define MAX(a, b) ((a) >= (b) ? (a): (b))
 #define MIN(a, b) ((a) <= (b) ? (a): (b))
