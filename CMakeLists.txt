@@ -12,7 +12,11 @@ find_package(PkgConfig REQUIRED)
 include(FindPkgConfig)
 
 # Find hidapi
-pkg_search_module(hidsapi REQUIRED hidsapi)
+pkg_search_module(hidapi QUIET hidapi-hidraw)
+if (NOT DEFINED ${hidapi_LIBS})
+	list(APPEND CMAKE_PREFIX_PATH "/usr/lib/x86_64-linux-gnu/")
+	pkg_search_module(hidapi REQUIRED hidapi-libusb)
+endif()
 
 add_subdirectory("${CMAKE_SOURCE_DIR}/drivers")
 
@@ -27,7 +31,7 @@ add_executable(${PROJECT_NAME}
 )
 
 target_link_libraries(${PROJECT_NAME}
-	PRIVATE ${hidsapi_LIBRARIES}
+	PRIVATE ${hidapi_LINK_LIBRARIES}
 	PRIVATE generic
 	PRIVATE hs610
 )

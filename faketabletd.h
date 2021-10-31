@@ -27,13 +27,7 @@
 #define HID_SET_REQUEST_TYPE        0x21
 
 // Also defined in the document described above
-#define HID_SET_IDLE                0x0a
-#define HID_SET_PROTOCOL            0x0a
-#define     HID_SET_PROTOCOL_BOOT   0
-#define     HID_SET_PROTOCOL_REPORT 1
-#define HID_TIMEOUT                 1000
 #define HID_BUFFER_SIZE             0x40
-#define HID_ENDPOINT                0x81
 
 #define DEFAULT_CURSOR_SPEED        5000
 

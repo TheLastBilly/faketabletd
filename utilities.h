@@ -29,14 +29,14 @@
 {                                                                           \
     int _ret = _expr;                                                       \
     if(_ret < 0)                                                            \
-        __WARNING(_fmt " %s", ##_args, extra);                              \
+        __WARNING(_fmt "%s", ##_args, extra);                               \
 }
 #define __BASE_CATCHER_CRITICAL(_expr, _fmt, extra, _args...)               \
 {                                                                           \
     int _ret = _expr;                                                       \
     if(_ret < 0)                                                            \
     {                                                                       \
-        __ERROR(_fmt " %s", ##_args, extra);                                \
+        __ERROR(_fmt "%s", ##_args, extra);                                 \
         exit(_ret);                                                         \
     }                                                                       \
 }
@@ -47,6 +47,11 @@
 #define __CATCHER_CRITICAL(_expr, _fmt, _args...)                           \
     __BASE_CATCHER_CRITICAL(_expr, _fmt, "", ##_args)
 
+// hiadpi catchers
+#define __HIDAPI_CATCHER(_dev, _expr, _fmt, _args...)                       \
+    __BASE_CATCHER(_expr, _fmt ": ", ##_args, (const char*)hid_error(_dev))
+#define __HIDAPI_CATCHER_CRITICAL(_dev, _expr, _fmt, _args...)              \
+    __BASE_CATCHER_CRITICAL(_expr, _fmt ": ", (const char*)hid_error(_dev), ##_args)
 
 // libusb catchers
 #define __USB_CATCHER(_expr, _fmt, _args...)                                \
@@ -56,9 +61,9 @@
 
 // stderr catches
 #define __STD_CATCHER(_expr, _fmt, _args...)                                \
-    __BASE_CATCHER(_expr, _fmt ":", strerror(_ret), ##_args)
+    __BASE_CATCHER(_expr, _fmt ": ", strerror(_ret), ##_args)
 #define __STD_CATCHER_CRITICAL(_expr, _fmt, _args...)                       \
-    __BASE_CATCHER_CRITICAL(_expr, _fmt ":", strerror(_ret), ##_args)
+    __BASE_CATCHER_CRITICAL(_expr, _fmt ": ", strerror(_ret), ##_args)
 
 #define VALIDATE(_expr, _fmt, _args...) __CATCHER_CRITICAL((_expr) ? 0 : -1, _fmt, ##_args);
 
