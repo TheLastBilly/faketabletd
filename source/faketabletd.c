@@ -279,6 +279,13 @@ static void interrupt_transfer_callback(struct libusb_transfer *transfer)
     bool terminate = true;
     struct raw_input_data_t raw_input_data;
     if(transfer == NULL || get_should_close()) return;
+
+#ifndef NDEBUG
+    __INFO("report: ");
+    for(size_t s = 0; s < transfer->actual_length; s++)
+        printf("%02X ", transfer->buffer[s]);
+    printf("\n");
+#endif
     
     switch (transfer->status)
     {
