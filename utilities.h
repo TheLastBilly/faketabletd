@@ -48,10 +48,10 @@
     __BASE_CATCHER_CRITICAL(_expr, _fmt, "", ##_args)
 
 // hiadpi catchers
-#define __HIDAPI_CATCHER(_dev, _expr, _fmt, _args...)                       \
-    __BASE_CATCHER(_expr, _fmt ": ", ##_args, (const char*)hid_error(_dev))
-#define __HIDAPI_CATCHER_CRITICAL(_dev, _expr, _fmt, _args...)              \
-    __BASE_CATCHER_CRITICAL(_expr, _fmt ": ", (const char*)hid_error(_dev), ##_args)
+#define __HIDAPI_CATCHER(_dev, _expr,  _fmt, _args...)                              \
+    __BASE_CATCHER((_expr) ? -1 : 0, _fmt ": %ls", "", ##_args, hid_error(_dev))
+#define __HIDAPI_CATCHER_CRITICAL(_dev, _expr, _fmt, _args...)                     \
+    __BASE_CATCHER_CRITICAL((_expr) ? -1 : 0, _fmt ": %ls", "", ##_args, hid_error(_dev))
 
 // libevdev catchers
 #define __EVDEV_CATCHER(_expr, _fmt, _args...)                              \

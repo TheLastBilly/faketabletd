@@ -145,16 +145,17 @@ static struct libevdev_uinput *create_virtual_mouse()
         // Setup mouse events, buttons, scroll wheel and movement
         ret = libevdev_enable_event_type(device, EV_KEY); if(ret < 0) break;
         ret = libevdev_enable_event_type(device, EV_SYN); if(ret < 0) break;
+        ret = libevdev_enable_event_type(device, EV_REL); if(ret < 0) break;
 
         set_event(EV_KEY, EV_KEY);
         set_event(EV_KEY, BTN_LEFT);
         set_event(EV_KEY, BTN_RIGHT);
         set_event(EV_KEY, BTN_MIDDLE);
-        set_event(EV_KEY, EV_REL);
-        set_event(EV_KEY, REL_X);
-        set_event(EV_KEY, REL_Y);
-        set_event(EV_KEY, REL_WHEEL);
-        set_event(EV_KEY, REL_WHEEL_HI_RES);
+
+        set_event(EV_REL, REL_X);
+        set_event(EV_REL, REL_Y);
+        set_event(EV_REL, REL_WHEEL);
+        set_event(EV_REL, REL_WHEEL_HI_RES);
 
         set_event(EV_SYN,  SYN_REPORT);
 
@@ -200,6 +201,8 @@ static struct libevdev_uinput *create_virtual_keyboard()
         
         for(int i = KEY_RESERVED; i < KEY_F24; i++)
         { set_event(EV_KEY, i); }
+
+        set_event(EV_SYN,  SYN_REPORT);
 
         libevdev_set_name(device, FAKETABLETD_NAME " Keyboard");
         libevdev_set_id_vendor(device, 0x1232);
@@ -307,11 +310,7 @@ static bool look_for_devices(const char **device_name)
 
     // Get device list
     info = device_info = hid_enumerate(0,0);
-    __HIDAPI_CATCHER_CRITICAL(
-        handle,
-        info != NULL ? 1 : -1, 
-        "cannot retreive connected devices"
-    );
+    __HIDAPI_CATCHER_CRITICAL(NULL, info == NULL, "cannot retreive connected devices");
 
     // Find compatible devices
     while(info != NULL)
@@ -427,6 +426,9 @@ int main(int argc, char const **argv)
     should_close = false;
     should_reset = false;
 
+    use_virtual_cursor = false;
+    use_virtual_wheel = false;
+
     const char* device_name = NULL;
 
     // Make sure we catch Ctrl-C when asked to terminate
@@ -472,7 +474,7 @@ int main(int argc, char const **argv)
     // Read config from config file
     read_config();
 
-    while(get_should_reset())
+    while(1)
     {
         // Make sure we are clear to go on every cycle
         cleannup();
@@ -491,11 +493,7 @@ int main(int argc, char const **argv)
         // Open device
         __INFO("connecting to device");
         handle = hid_open(current_device->vendor_id, current_device->product_id, NULL);
-        __HIDAPI_CATCHER_CRITICAL(
-            NULL,
-            handle == NULL ? -1 : 1,
-            "cannot open device!"
-        );
+        __HIDAPI_CATCHER_CRITICAL(NULL, handle == NULL, "cannot open device!");
         
         __INFO("connected!");
 
@@ -514,25 +512,22 @@ int main(int argc, char const **argv)
         if(use_virtual_keyboard)
             keyboard_device = create_virtual_keyboard();
 
-        __HIDAPI_CATCHER(
-            handle,
-            hid_set_nonblocking(handle, 1),
-            "cannot set device to nonblocking"
-        );
+
+        __HIDAPI_CATCHER_CRITICAL( handle, hid_set_nonblocking(handle, 1) != 0, "cannot set device to nonblocking" );
         __INFO("done configuring device!");
 
         __INFO("ready!");
         while(!get_should_close())
         {
-            __HIDAPI_CATCHER_CRITICAL(
-                handle,
-                !get_should_close() ?
-                    ret = hid_read(handle, hid_buffer, HID_BUFFER_SIZE): 0,
-                "cannot read data from the device"
-            );
+            ret = hid_read(handle, hid_buffer, HID_BUFFER_SIZE);
             if(ret > 0)
                 process_raw_report(hid_buffer);
+            else if(!get_should_close())
+                __HIDAPI_CATCHER_CRITICAL(handle, ret < 0, "cannot read data from the device (%d)", ret);
         }
+
+        if(!get_should_reset())
+            break;
     }
 
     __INFO("terminating...");
